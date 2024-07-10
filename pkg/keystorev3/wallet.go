@@ -1,4 +1,4 @@
-// Copyright © 2022 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -21,15 +21,100 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/hyperledger/firefly-common/pkg/fftypes"
+	"github.com/hyperledger/firefly-signer/pkg/ethtypes"
 	"github.com/hyperledger/firefly-signer/pkg/secp256k1"
 	"golang.org/x/crypto/sha3"
 )
 
 const (
-	nLight    int = 1 << 12
-	nStandard int = 1 << 10
-	pDefault  int = 1
+	version3        = 3
+	cipherAES128ctr = "aes-128-ctr"
+	kdfTypeScrypt   = "scrypt"
+	kdfTypePbkdf2   = "pbkdf2"
+	nLight          = 1 << 12
+	nStandard       = 1 << 10
+	pDefault        = 1
 )
+
+type WalletFile interface {
+	KeyPair() *secp256k1.KeyPair
+	JSON() []byte
+}
+
+type kdfParamsScrypt struct {
+	DKLen int                    `json:"dklen"`
+	N     int                    `json:"n"`
+	P     int                    `json:"p"`
+	R     int                    `json:"r"`
+	Salt  ethtypes.HexBytesPlain `json:"salt"`
+}
+
+type kdfParamsPbkdf2 struct {
+	DKLen int                    `json:"dklen"`
+	C     int                    `json:"c"`
+	PRF   string                 `json:"prf"`
+	Salt  ethtypes.HexBytesPlain `json:"salt"`
+}
+
+type cipherParams struct {
+	IV ethtypes.HexBytesPlain `json:"iv"`
+}
+
+type cryptoCommon struct {
+	Cipher       string                 `json:"cipher"`
+	CipherText   ethtypes.HexBytesPlain `json:"ciphertext"`
+	CipherParams cipherParams           `json:"cipherparams"`
+	KDF          string                 `json:"kdf"`
+	MAC          ethtypes.HexBytesPlain `json:"mac"`
+}
+
+type cryptoScrypt struct {
+	cryptoCommon
+	KDFParams kdfParamsScrypt `json:"kdfparams"`
+}
+
+type cryptoPbkdf2 struct {
+	cryptoCommon
+	KDFParams kdfParamsPbkdf2 `json:"kdfparams"`
+}
+
+type walletFileBase struct {
+	Address ethtypes.AddressPlainHex `json:"address"`
+	ID      *fftypes.UUID            `json:"id"`
+	Version int                      `json:"version"`
+
+	keypair *secp256k1.KeyPair
+}
+
+type walletFileCommon struct {
+	walletFileBase
+	Crypto cryptoCommon `json:"crypto"`
+}
+
+type walletFilePbkdf2 struct {
+	walletFileBase
+	Crypto cryptoPbkdf2 `json:"crypto"`
+}
+
+type walletFileScrypt struct {
+	walletFileBase
+	Crypto cryptoScrypt `json:"crypto"`
+}
+
+func (w *walletFileBase) KeyPair() *secp256k1.KeyPair {
+	return w.keypair
+}
+
+func (w *walletFilePbkdf2) JSON() []byte {
+	b, _ := json.Marshal(w)
+	return b
+}
+
+func (w *walletFileScrypt) JSON() []byte {
+	b, _ := json.Marshal(w)
+	return b
+}
 
 func NewWalletFileLight(password string, keypair *secp256k1.KeyPair) WalletFile {
 	return newScryptWalletFile(password, keypair, nLight, pDefault)

@@ -1,4 +1,4 @@
-// Copyright © 2022 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -37,13 +37,12 @@ func (k *KeyPair) PublicKeyBytes() []byte {
 	return k.PublicKey.SerializeUncompressed()[1:]
 }
 
-func GenerateSecp256k1KeyPair() (*KeyPair, error) {
-	// Generates key of curve S256() by default
+func GenerateKeyPair() (*KeyPair, error) {
 	key, _ := btcec.NewPrivateKey()
 	return wrapSecp256k1Key(key, key.PubKey()), nil
 }
 
-func NewSecp256k1KeyPair(b []byte) (*KeyPair, error) {
+func NewKeyPair(b []byte) (*KeyPair, error) {
 	key, pubKey := btcec.PrivKeyFromBytes(b)
 	return wrapSecp256k1Key(key, pubKey), nil
 }
@@ -64,4 +63,15 @@ func PublicKeyToAddress(pubKey *btcec.PublicKey) *ethtypes.Address0xHex {
 	a := new(ethtypes.Address0xHex)
 	copy(a[:], hash.Sum(nil)[12:32])
 	return a
+}
+
+func GenerateSecp256k1KeyPair() (*KeyPair, error) {
+	// Generates key of curve S256() by default
+	key, _ := btcec.NewPrivateKey()
+	return wrapSecp256k1Key(key, key.PubKey()), nil
+}
+
+func NewSecp256k1KeyPair(b []byte) (*KeyPair, error) {
+	key, pubKey := btcec.PrivKeyFromBytes(b)
+	return wrapSecp256k1Key(key, pubKey), nil
 }

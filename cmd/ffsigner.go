@@ -1,4 +1,4 @@
-// Copyright © 2023 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -18,17 +18,23 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/hyperledger/firefly-common/pkg/config"
 	"github.com/hyperledger/firefly-common/pkg/i18n"
 	"github.com/hyperledger/firefly-common/pkg/log"
 	"github.com/hyperledger/firefly-signer/internal/rpcserver"
 	"github.com/hyperledger/firefly-signer/internal/signerconfig"
 	"github.com/hyperledger/firefly-signer/internal/signermsgs"
+	"github.com/hyperledger/firefly-signer/pkg/azurekeyvault"
+	"github.com/hyperledger/firefly-signer/pkg/ethsigner"
 	"github.com/hyperledger/firefly-signer/pkg/fswallet"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -58,16 +64,14 @@ func Execute() error {
 }
 
 func initConfig() {
-	// Read the configuration
 	signerconfig.Reset()
 }
 
 func run() error {
-
 	initConfig()
+	router := mux.NewRouter()
 	err := config.ReadConfig("ffsigner", cfgFile)
 
-	// Setup logging after reading config (even if failed), to output header correctly
 	ctx, cancelCtx := context.WithCancel(context.Background())
 	defer cancelCtx()
 	ctx = log.WithLogger(ctx, logrus.WithField("pid", fmt.Sprintf("%d", os.Getpid())))
@@ -75,13 +79,11 @@ func run() error {
 
 	config.SetupLogging(ctx)
 
-	// Deferred error return from reading config
 	if err != nil {
 		cancelCtx()
 		return i18n.WrapError(ctx, err, i18n.MsgConfigFailed)
 	}
 
-	// Setup signal handling to cancel the context, which shuts down the API Server
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigs
@@ -89,19 +91,101 @@ func run() error {
 		cancelCtx()
 	}()
 
-	if !config.GetBool(signerconfig.FileWalletEnabled) {
+	var wallet ethsigner.Wallet
+
+	switch {
+	case config.GetBool(signerconfig.KeyVaultEnabled):
+		vaultURL := config.GetString(signerconfig.KeyVaultConfig.Get("vaultURL").(config.RootKey))
+		clientID := config.GetString(signerconfig.KeyVaultConfig.Get("clientID").(config.RootKey))
+		clientSecret := config.GetString(signerconfig.KeyVaultConfig.Get("clientSecret").(config.RootKey))
+		tenantID := config.GetString(signerconfig.KeyVaultConfig.Get("tenantID").(config.RootKey))
+
+		cache := map[string]interface{}{
+			"maxSize":      config.GetInt(signerconfig.KeyVaultConfig.Get("cache.maxSize").(config.RootKey)),
+			"itemsToPrune": config.GetInt(signerconfig.KeyVaultConfig.Get("cache.itemsToPrune").(config.RootKey)),
+			"ttl":          config.GetDuration(signerconfig.KeyVaultConfig.Get("cache.ttl").(config.RootKey)),
+		}
+
+		keyVaultClient, err := azurekeyvault.NewAzureKeyVaultClient(vaultURL, clientID, clientSecret, tenantID, cache)
+		if err != nil {
+			return err
+		}
+		wallet = keyVaultClient
+
+	case config.GetBool(signerconfig.FileWalletEnabled):
+		fileWallet, err := fswallet.NewFilesystemWallet(ctx, fswallet.ReadConfig(signerconfig.FileWalletConfig))
+		if err != nil {
+			return err
+		}
+		wallet = fileWallet
+
+		// Assert that the wallet is of type fswallet.Wallet to use CreateWallet method
+		fsWallet, ok := wallet.(fswallet.Wallet)
+		if !ok {
+			return fmt.Errorf("wallet does not implement fswallet.Wallet")
+		}
+
+		router.HandleFunc("/wallets/create", createWalletHandler(fsWallet)).Methods("POST")
+
+	default:
 		return i18n.NewError(ctx, signermsgs.MsgNoWalletEnabled)
 	}
-	fileWallet, err := fswallet.NewFilesystemWallet(ctx, fswallet.ReadConfig(signerconfig.FileWalletConfig))
+
+	server, err := rpcserver.NewServer(ctx, wallet)
 	if err != nil {
 		return err
 	}
 
-	server, err := rpcserver.NewServer(ctx, fileWallet)
-	if err != nil {
-		return err
+	srv := &http.Server{
+		Addr:    ":8555",
+		Handler: router,
+		// Good practice: enforce timeouts for servers you create!
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			log.L(ctx).Errorf("HTTP server failed: %s", err)
+		}
+	}()
+
 	return runServer(server)
+}
+
+type CreateWalletRequest struct {
+	PrivateKey string `json:"privateKey,omitempty"`
+}
+
+type CreateWalletResponse struct {
+	Address string `json:"address"`
+}
+
+func createWalletHandler(wallet fswallet.Wallet) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req CreateWalletRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		ctx := context.Background()
+		address, err := wallet.CreateWallet(ctx, req.PrivateKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		resp := CreateWalletResponse{
+			Address: address.String(),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			log.L(ctx).Errorf("Failed to encode response: %s", err)
+		}
+	}
 }
 
 func runServer(server rpcserver.Server) error {

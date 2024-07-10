@@ -1,4 +1,5 @@
 fileWallet:
+  enabled: true
   path: "./test/keystore_toml"
   disableListener: true
   filenames:
@@ -7,5 +8,15 @@ fileWallet:
     format: auto
     keyFileProperty: '{{ index .signing "key-file" }}'
     passwordFileProperty: '{{ index .signing "password-file" }}'
+azureKeyVault:
+  enabled: false
+  vaultURL: https://mykeyvault.vault.azure.net/
+  clientID: your-client-id
+  clientSecret: your-client-secret
+  tenantID: your-tenant-id
+  cache:
+    maxSize: 1000
+    itemsToPrune: 100
+    ttl: 1h    
 backend:
   chainId: 0

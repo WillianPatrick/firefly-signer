@@ -1,4 +1,4 @@
-// Copyright © 2022 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -25,7 +25,7 @@ var ffm = func(key, translation string) i18n.MessageKey {
 	return i18n.FFM(language.AmericanEnglish, key, translation)
 }
 
-//revive:disable
+// revive:disable
 var (
 	APIIntegerDescription = ffm("api.integer", "An integer. You are recommended to use a JSON string. A JSON number can be used for values up to the safe maximum.")
 	APIBoolDescription    = ffm("api.bool", "A boolean. You can use a boolean or a string true/false as input")

@@ -1,4 +1,4 @@
-// Copyright © 2022 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -20,6 +20,7 @@ import (
 	"github.com/hyperledger/firefly-common/pkg/config"
 	"github.com/hyperledger/firefly-common/pkg/httpserver"
 	"github.com/hyperledger/firefly-common/pkg/wsclient"
+	"github.com/hyperledger/firefly-signer/pkg/azurekeyvault"
 	"github.com/hyperledger/firefly-signer/pkg/fswallet"
 	"github.com/spf13/viper"
 )
@@ -27,10 +28,9 @@ import (
 var ffc = config.AddRootKey
 
 var (
-	// BackendChainID optionally set the Chain ID manually (usually queries network ID)
-	BackendChainID = ffc("backend.chainId")
-	// FileWalletEnabled if the Keystore V3 wallet is enabled
+	BackendChainID    = ffc("backend.chainId")
 	FileWalletEnabled = ffc("fileWallet.enabled")
+	KeyVaultEnabled   = ffc("azureKeyVault.enabled")
 )
 
 var ServerConfig config.Section
@@ -41,9 +41,12 @@ var BackendConfig config.Section
 
 var FileWalletConfig config.Section
 
+var KeyVaultConfig config.Section
+
 func setDefaults() {
 	viper.SetDefault(string(BackendChainID), -1)
 	viper.SetDefault(string(FileWalletEnabled), true)
+	viper.SetDefault(string(KeyVaultEnabled), false)
 }
 
 func Reset() {
@@ -61,4 +64,6 @@ func Reset() {
 	FileWalletConfig = config.RootSection("fileWallet")
 	fswallet.InitConfig(FileWalletConfig)
 
+	KeyVaultConfig = config.RootSection("azureKeyVault")
+	azurekeyvault.InitConfig(KeyVaultConfig)
 }

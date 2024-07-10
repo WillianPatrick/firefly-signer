@@ -1,4 +1,4 @@
-// Copyright © 2023 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -18,7 +18,9 @@ package fswallet
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -49,6 +51,7 @@ type Wallet interface {
 	ethsigner.WalletTypedData
 	GetWalletFile(ctx context.Context, addr ethtypes.Address0xHex) (keystorev3.WalletFile, error)
 	AddListener(listener chan<- ethtypes.Address0xHex)
+	CreateWallet(ctx context.Context, privateKeyHex string) (ethtypes.Address0xHex, error) // Add this method
 }
 
 func NewFilesystemWallet(ctx context.Context, conf *Config, initialListeners ...chan<- ethtypes.Address0xHex) (ww Wallet, err error) {
@@ -58,7 +61,6 @@ func NewFilesystemWallet(ctx context.Context, conf *Config, initialListeners ...
 		addressToFileMap: make(map[ethtypes.Address0xHex]string),
 	}
 	w.signerCache = ccache.New(
-		// We use a LRU cache with a size-aware max
 		ccache.Configure().
 			MaxSize(fftypes.ParseToByteSize(conf.SignerCacheSize)),
 	)
@@ -126,16 +128,13 @@ func (w *fsWallet) SignTypedDataV4(ctx context.Context, from ethtypes.Address0xH
 }
 
 func (w *fsWallet) Initialize(ctx context.Context) error {
-	// Run a get accounts pass, to check all is ok
 	lCtx, lCancel := context.WithCancel(log.WithLogField(ctx, "fswallet", w.conf.Path))
 	w.fsListenerCancel = lCancel
 	w.fsListenerStarted = make(chan error)
 	w.fsListenerDone = make(chan struct{})
-	// Make sure listener is listening for changes, before doing the scan
 	if err := w.startFilesystemListener(lCtx); err != nil {
 		return err
 	}
-	// Do an initial full scan before returning
 	return w.Refresh(ctx)
 }
 
@@ -145,7 +144,6 @@ func (w *fsWallet) AddListener(listener chan<- ethtypes.Address0xHex) {
 	w.listeners = append(w.listeners, listener)
 }
 
-// GetAccounts returns the currently cached list of known addresses
 func (w *fsWallet) GetAccounts(_ context.Context) ([]*ethtypes.Address0xHex, error) {
 	w.mux.Lock()
 	defer w.mux.Unlock()
@@ -165,7 +163,7 @@ func (w *fsWallet) matchFilename(ctx context.Context, f fs.FileInfo) *ethtypes.A
 			log.L(ctx).Tracef("Ignoring '%s/%s': does not match regexp", w.conf.Path, f.Name())
 			return nil
 		}
-		addr, err := ethtypes.NewAddress(match[1]) // safe due to SubexpNames() length check
+		addr, err := ethtypes.NewAddress(match[1])
 		if err != nil {
 			log.L(ctx).Warnf("Ignoring '%s/%s': invalid address '%s': %s", w.conf.Path, f.Name(), match[1], err)
 			return nil
@@ -204,7 +202,6 @@ func (w *fsWallet) Refresh(ctx context.Context) error {
 }
 
 func (w *fsWallet) notifyNewFiles(ctx context.Context, files ...fs.FileInfo) {
-	// Lock now we have the list
 	w.mux.Lock()
 	defer w.mux.Unlock()
 	newAddresses := make([]*ethtypes.Address0xHex, 0)
@@ -224,7 +221,6 @@ func (w *fsWallet) notifyNewFiles(ctx context.Context, files ...fs.FileInfo) {
 	listeners := make([]chan<- ethtypes.Address0xHex, len(w.listeners))
 	copy(listeners, w.listeners)
 	log.L(ctx).Debugf("Processed %d files. Found %d new addresses", len(files), len(newAddresses))
-	// Avoid holding the lock while calling the listeners, by using a go-routine
 	go func() {
 		for _, l := range w.listeners {
 			for _, addr := range newAddresses {
@@ -243,7 +239,6 @@ func (w *fsWallet) Close() error {
 }
 
 func (w *fsWallet) getSignerForJSONAccount(ctx context.Context, rawAddrJSON json.RawMessage) (*secp256k1.KeyPair, error) {
-
 	// We require an ethereum address in the "from" field
 	var from ethtypes.Address0xHex
 	err := json.Unmarshal(rawAddrJSON, &from)
@@ -254,17 +249,14 @@ func (w *fsWallet) getSignerForJSONAccount(ctx context.Context, rawAddrJSON json
 }
 
 func (w *fsWallet) getSignerForAddr(ctx context.Context, from ethtypes.Address0xHex) (*secp256k1.KeyPair, error) {
-
 	wf, err := w.GetWalletFile(ctx, from)
 	if err != nil {
 		return nil, err
 	}
 	return wf.KeyPair(), nil
-
 }
 
 func (w *fsWallet) GetWalletFile(ctx context.Context, addr ethtypes.Address0xHex) (keystorev3.WalletFile, error) {
-
 	addrString := addr.String()
 	cached := w.signerCache.Get(addrString)
 	if cached != nil {
@@ -291,11 +283,9 @@ func (w *fsWallet) GetWalletFile(ctx context.Context, addr ethtypes.Address0xHex
 
 	w.signerCache.Set(addrString, kv3, w.signerCacheTTL)
 	return kv3, err
-
 }
 
 func (w *fsWallet) loadWalletFile(ctx context.Context, addr ethtypes.Address0xHex, primaryFilename string) (keystorev3.WalletFile, error) {
-
 	b, err := os.ReadFile(primaryFilename)
 	if err != nil {
 		log.L(ctx).Errorf("Failed to read '%s': %s", primaryFilename, err)
@@ -337,7 +327,6 @@ func (w *fsWallet) loadWalletFile(ctx context.Context, addr ethtypes.Address0xHe
 			log.L(ctx).Errorf("Failed to read '%s' (default password file): %s", w.conf.DefaultPasswordFile, err)
 			return nil, i18n.NewError(ctx, signermsgs.MsgWalletFailed, addr)
 		}
-
 	}
 
 	// Ok - now we have what we need to open up the keyfile
@@ -348,7 +337,6 @@ func (w *fsWallet) loadWalletFile(ctx context.Context, addr ethtypes.Address0xHe
 	}
 	log.L(ctx).Infof("Loaded signing key for address: %s", addr)
 	return kv3, nil
-
 }
 
 func (w *fsWallet) getKeyAndPasswordFiles(ctx context.Context, addr ethtypes.Address0xHex, primaryFilename string, primaryFile []byte) (kf string, pf string, err error) {
@@ -404,4 +392,69 @@ func (w *fsWallet) goTemplateToString(ctx context.Context, filename string, data
 		return "", nil
 	}
 	return val, err
+}
+
+func (w *fsWallet) CreateWallet(ctx context.Context, privateKeyHex string) (ethtypes.Address0xHex, error) {
+	var keypair *secp256k1.KeyPair
+	var err error
+
+	if privateKeyHex == "" {
+		keypair, err = secp256k1.GenerateSecp256k1KeyPair()
+		if err != nil {
+			return ethtypes.Address0xHex{}, err
+		}
+	} else {
+		privateKey, err := hex.DecodeString(privateKeyHex)
+		if err != nil {
+			return ethtypes.Address0xHex{}, err
+		}
+		keypair, err = secp256k1.NewSecp256k1KeyPair(privateKey)
+		if err != nil {
+			return ethtypes.Address0xHex{}, err
+		}
+	}
+
+	password, err := os.ReadFile("/data/password")
+	if err != nil {
+		return ethtypes.Address0xHex{}, fmt.Errorf("failed to read password file: %w", err)
+	}
+
+	walletFile := keystorev3.NewWalletFileStandard(strings.TrimSpace(string(password)), keypair)
+	addr := strings.TrimPrefix(keypair.Address.String(), "0x")
+	walletFilePath := path.Join(w.conf.Path, addr)
+
+	walletFileJSON, err := json.Marshal(walletFile)
+	if err != nil {
+		return ethtypes.Address0xHex{}, err
+	}
+
+	err = os.WriteFile(walletFilePath, walletFileJSON, 0600)
+	if err != nil {
+		return ethtypes.Address0xHex{}, err
+	}
+
+	metadataFilePath := path.Join(w.conf.Path, addr+".toml")
+	metadataContent := fmt.Sprintf(`
+[metadata]
+createdAt = "%s"
+description = "File based configuration"
+
+[signing]
+type = "file-based-signer"
+key-file = "%s"
+password-file = "%s"
+`, time.Now().Format(time.RFC3339), walletFilePath, w.conf.DefaultPasswordFile)
+
+	err = os.WriteFile(metadataFilePath, []byte(metadataContent), 0600)
+	if err != nil {
+		return ethtypes.Address0xHex{}, err
+	}
+
+	fi, err := os.Stat(walletFilePath)
+	if err != nil {
+		return ethtypes.Address0xHex{}, err
+	}
+
+	w.notifyNewFiles(ctx, fi)
+	return keypair.Address, nil
 }

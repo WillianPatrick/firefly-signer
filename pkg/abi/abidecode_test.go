@@ -1046,7 +1046,7 @@ func TestDecodeAddressWithNonZeroPadding(t *testing.T) {
 		"ffffffffffffffffffffffffab0974bbed8afc5212e951c8498873319d02d025" + // (uint256) 0xffffffffffffffffffffffffab0974bbed8afc5212e951c8498873319d02d025
 		"ffffffffffffffffffffffffab0974bbed8afc5212e951c8498873319d02d025" + // (uint160) 0xab0974bbed8afc5212e951c8498873319d02d025
 		"ffffffffffffffffffffffffab0974bbed8afc5212e951c8498873319d02d025" + // ( uint64) 0x498873319d02d025
-		"ffffffffffffffffffffffffab0974bbed8afc5212e951c8498873319d02d025")  // (  uint8) 0x25  
+		"ffffffffffffffffffffffffab0974bbed8afc5212e951c8498873319d02d025") // (  uint8) 0x25
 	assert.NoError(t, err)
 
 	cv, err := f.DecodeCallData(d)

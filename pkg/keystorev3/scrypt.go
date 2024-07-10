@@ -1,4 +1,4 @@
-// Copyright © 2022 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -46,7 +46,6 @@ func mustGenerateDerivedScryptKey(password string, salt []byte, n, p int) []byte
 }
 
 func newScryptWalletFile(password string, keypair *secp256k1.KeyPair, n int, p int) WalletFile {
-
 	// Generate a sale for the scrypt
 	salt := mustReadBytes(32, rand.Reader)
 
@@ -100,7 +99,7 @@ func (w *walletFileScrypt) decrypt(password []byte) error {
 	}
 	privateKey, err := w.Crypto.decryptCommon(derivedKey)
 	if err == nil {
-		w.keypair, err = secp256k1.NewSecp256k1KeyPair(privateKey)
+		w.keypair, err = secp256k1.NewKeyPair(privateKey)
 	}
 	return err
 }

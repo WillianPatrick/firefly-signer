@@ -1,4 +1,4 @@
-// Copyright © 2023 Kaleido, Inc.
+// Copyright © 2024 Kaleido, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -25,7 +25,7 @@ var ffc = func(key, translation, fieldType string) i18n.ConfigMessageKey {
 	return i18n.FFC(language.AmericanEnglish, key, translation, fieldType)
 }
 
-//revive:disable
+// revive:disable
 var (
 	ConfigFileWalletEnabled                      = ffc("config.fileWallet.enabled", "Whether the Keystore V3 filesystem wallet is enabled", "boolean")
 	ConfigFileWalletPath                         = ffc("config.fileWallet.path", "Path on the filesystem where the metadata files (and/or key files) are located", "string")
@@ -38,7 +38,7 @@ var (
 	ConfigFileWalletDefaultPasswordFile          = ffc("config.fileWallet.defaultPasswordFile", "Optional default password file to use, if one is not specified individually for the key (via metadata, or file extension)", "string")
 	ConfigFileWalletDisableListener              = ffc("config.fileWallet.disableListener", "Disable the filesystem listener that automatically detects the creation of new keystore files", "boolean")
 	ConfigFileWalletSignerCacheSize              = ffc("config.fileWallet.signerCacheSize", "Maximum of signing keys to hold in memory", "number")
-	ConfigFileWalletSignerCacheTTL               = ffc("config.fileWallet.signerCacheTTL", "How long ot leave an unused signing key in memory", "duration")
+	ConfigFileWalletSignerCacheTTL               = ffc("config.fileWallet.signerCacheTTL", "How long to leave an unused signing key in memory", "duration")
 	ConfigFileWalletMetadataFormat               = ffc("config.fileWallet.metadata.format", "Set this if the primary key file is a metadata file. Supported formats: auto (from extension) / filename / toml / yaml / json (please quote \"0x...\" strings in YAML)", "string")
 	ConfigFileWalletMetadataKeyFileProperty      = ffc("config.fileWallet.metadata.keyFileProperty", "Go template to look up the key-file path from the metadata. Example: '{{ index .signing \"key-file\" }}'", "go-template")
 	ConfigFileWalletMetadataPasswordFileProperty = ffc("config.fileWallet.metadata.passwordFileProperty", "Go template to look up the password-file path from the metadata", "go-template")
@@ -53,4 +53,17 @@ var (
 	ConfigBackendChainID  = ffc("config.backend.chainId", "Optionally set the Chain ID of the blockchain. Otherwise the Network ID will be queried, and used as the Chain ID in signing", "number")
 	ConfigBackendURL      = ffc("config.backend.url", "URL for the backend JSON/RPC server / blockchain node", "url")
 	ConfigBackendProxyURL = ffc("config.backend.proxy.url", "Optional HTTP proxy URL", "url")
+
+	ConfigAzureKeyVaultEnabled           = ffc("config.azureKeyVault.enabled", "Whether the Azure Key Vault is enabled", "boolean")
+	ConfigAzureKeyVaultURL               = ffc("config.azureKeyVault.vaultURL", "The URL of the Azure Key Vault", "string")
+	ConfigAzureKeyVaultClientID          = ffc("config.azureKeyVault.clientID", "The Client ID for the Azure Key Vault", "string")
+	ConfigAzureKeyVaultClientSecret      = ffc("config.azureKeyVault.clientSecret", "The Client Secret for the Azure Key Vault", "string")
+	ConfigAzureKeyVaultTenantID          = ffc("config.azureKeyVault.tenantID", "The Tenant ID for the Azure Key Vault", "string")
+	ConfigAzureKeyVaultCacheMaxSize      = ffc("config.azureKeyVault.cache.maxSize", "The maximum size of the cache for Azure Key Vault", "number")
+	ConfigAzureKeyVaultCacheItemsToPrune = ffc("config.azureKeyVault.cache.itemsToPrune", "The number of items to prune from the cache when it exceeds the maximum size", "number")
+	ConfigAzureKeyVaultCacheTTL          = ffc("config.azureKeyVault.cache.ttl", "The TTL (time-to-live) for cache entries in Azure Key Vault", "duration")
+
+	ConfigCacheItemsToPrune = ffc("config.cache.itemsToPrune", "The number of items to prune from the cache when it exceeds the maximum size", "number")
+	ConfigCacheMaxSize      = ffc("config.cache.maxSize", "The maximum size of the cache for Azure Key Vault", "number")
+	ConfigCacheTTL          = ffc("config.cache.ttl", "The TTL (time-to-live) for cache entries in Azure Key Vault", "duration")
 )
