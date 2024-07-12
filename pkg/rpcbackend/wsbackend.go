@@ -135,6 +135,10 @@ func (rc *wsRPCClient) handleReconnect(ctx context.Context, w wsclient.WSClient)
 			log.L(ctx).Infof("Resubscribing %s after WebSocket reconnect", s.localID)
 			_, rpcErr := s.sendSubscribe(ctx)
 			if rpcErr != nil {
+				if rpcErr.Code == 22014 { // Código do erro de carteira não disponível
+					log.L(ctx).Errorf("Wallet not available for subscription %s: %s", s.localID, rpcErr)
+					continue // Não tentar novamente
+				}
 				log.L(ctx).Errorf("Failed to send resubscribe: %s", rpcErr)
 				return rpcErr.Error()
 			}

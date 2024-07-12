@@ -394,6 +394,13 @@ func (w *fsWallet) goTemplateToString(ctx context.Context, filename string, data
 	return val, err
 }
 
+func coalesce(primary, fallback string) string {
+	if primary != "" {
+		return primary
+	}
+	return fallback
+}
+
 func (w *fsWallet) CreateWallet(ctx context.Context, privateKeyHex string) (ethtypes.Address0xHex, error) {
 	var keypair *secp256k1.KeyPair
 	var err error
@@ -414,7 +421,7 @@ func (w *fsWallet) CreateWallet(ctx context.Context, privateKeyHex string) (etht
 		}
 	}
 
-	password, err := os.ReadFile("/data/password")
+	password, err := os.ReadFile(coalesce(w.conf.DefaultPasswordFile, "/data/password"))
 	if err != nil {
 		return ethtypes.Address0xHex{}, fmt.Errorf("failed to read password file: %w", err)
 	}
@@ -443,7 +450,7 @@ description = "File based configuration"
 type = "file-based-signer"
 key-file = "%s"
 password-file = "%s"
-`, time.Now().Format(time.RFC3339), walletFilePath, w.conf.DefaultPasswordFile)
+`, time.Now().Format(time.RFC3339), walletFilePath, coalesce(w.conf.DefaultPasswordFile, "/data/password"))
 
 	err = os.WriteFile(metadataFilePath, []byte(metadataContent), 0600)
 	if err != nil {
