@@ -5,5 +5,5 @@ coverage.txt
 .DS_Store
 __debug*
 .vscode/*.log
-
+test/keystore_toml/ignore_dir
 .fake

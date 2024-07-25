@@ -51,7 +51,7 @@ type Wallet interface {
 	ethsigner.WalletTypedData
 	GetWalletFile(ctx context.Context, addr ethtypes.Address0xHex) (keystorev3.WalletFile, error)
 	AddListener(listener chan<- ethtypes.Address0xHex)
-	CreateWallet(ctx context.Context, privateKeyHex string) (ethtypes.Address0xHex, error) // Add this method
+	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) // Add this method
 }
 
 func NewFilesystemWallet(ctx context.Context, conf *Config, initialListeners ...chan<- ethtypes.Address0xHex) (ww Wallet, err error) {
@@ -401,7 +401,7 @@ func coalesce(primary, fallback string) string {
 	return fallback
 }
 
-func (w *fsWallet) CreateWallet(ctx context.Context, privateKeyHex string) (ethtypes.Address0xHex, error) {
+func (w *fsWallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) {
 	var keypair *secp256k1.KeyPair
 	var err error
 
@@ -421,12 +421,25 @@ func (w *fsWallet) CreateWallet(ctx context.Context, privateKeyHex string) (etht
 		}
 	}
 
-	password, err := os.ReadFile(coalesce(w.conf.DefaultPasswordFile, "/data/password"))
-	if err != nil {
-		return ethtypes.Address0xHex{}, fmt.Errorf("failed to read password file: %w", err)
+	var passwordToUse string
+	var passwordFilePath string
+	if password == "" {
+		passwordBytes, err := os.ReadFile(coalesce(w.conf.DefaultPasswordFile, "/data/password"))
+		if err != nil {
+			return ethtypes.Address0xHex{}, fmt.Errorf("failed to read password file: %w", err)
+		}
+		passwordToUse = strings.TrimSpace(string(passwordBytes))
+		passwordFilePath = coalesce(w.conf.DefaultPasswordFile, "/data/password")
+	} else {
+		passwordToUse = password
+		passwordFilePath = path.Join(w.conf.Filenames.PasswordPath, fmt.Sprintf("%s.pwd", strings.TrimPrefix(keypair.Address.String(), "0x")))
+		err = os.WriteFile(passwordFilePath, []byte(passwordToUse), 0600)
+		if err != nil {
+			return ethtypes.Address0xHex{}, fmt.Errorf("failed to write password file: %w", err)
+		}
 	}
 
-	walletFile := keystorev3.NewWalletFileStandard(strings.TrimSpace(string(password)), keypair)
+	walletFile := keystorev3.NewWalletFileStandard(passwordToUse, keypair)
 	addr := strings.TrimPrefix(keypair.Address.String(), "0x")
 	walletFilePath := path.Join(w.conf.Path, addr)
 
@@ -440,7 +453,7 @@ func (w *fsWallet) CreateWallet(ctx context.Context, privateKeyHex string) (etht
 		return ethtypes.Address0xHex{}, err
 	}
 
-	metadataFilePath := path.Join(w.conf.Path, addr+".toml")
+	metadataFilePath := path.Join(w.conf.Path, fmt.Sprintf("%s.toml", addr))
 	metadataContent := fmt.Sprintf(`
 [metadata]
 createdAt = "%s"
@@ -450,7 +463,7 @@ description = "File based configuration"
 type = "file-based-signer"
 key-file = "%s"
 password-file = "%s"
-`, time.Now().Format(time.RFC3339), walletFilePath, coalesce(w.conf.DefaultPasswordFile, "/data/password"))
+`, time.Now().Format(time.RFC3339), walletFilePath, passwordFilePath)
 
 	err = os.WriteFile(metadataFilePath, []byte(metadataContent), 0600)
 	if err != nil {

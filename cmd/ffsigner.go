@@ -95,15 +95,15 @@ func run() error {
 
 	switch {
 	case config.GetBool(signerconfig.KeyVaultEnabled):
-		vaultURL := config.GetString(signerconfig.KeyVaultConfig.Get("vaultURL").(config.RootKey))
-		clientID := config.GetString(signerconfig.KeyVaultConfig.Get("clientID").(config.RootKey))
-		clientSecret := config.GetString(signerconfig.KeyVaultConfig.Get("clientSecret").(config.RootKey))
-		tenantID := config.GetString(signerconfig.KeyVaultConfig.Get("tenantID").(config.RootKey))
+		vaultURL := config.GetString("azureKeyVault.vaultURL")
+		clientID := config.GetString("azureKeyVault.clientID")
+		clientSecret := config.GetString("azureKeyVault.clientSecret")
+		tenantID := config.GetString("azureKeyVault.tenantID")
 
 		cache := map[string]interface{}{
-			"maxSize":      config.GetInt(signerconfig.KeyVaultConfig.Get("cache.maxSize").(config.RootKey)),
-			"itemsToPrune": config.GetInt(signerconfig.KeyVaultConfig.Get("cache.itemsToPrune").(config.RootKey)),
-			"ttl":          config.GetDuration(signerconfig.KeyVaultConfig.Get("cache.ttl").(config.RootKey)),
+			"maxSize":      config.GetInt("azureKeyVault.cache.maxSize"),
+			"itemsToPrune": config.GetInt("azureKeyVault.cache.itemsToPrune"),
+			"ttl":          config.GetDuration("azureKeyVault.cache.ttl"),
 		}
 
 		keyVaultClient, err := azurekeyvault.NewAzureKeyVaultClient(vaultURL, clientID, clientSecret, tenantID, cache)
@@ -118,18 +118,11 @@ func run() error {
 			return err
 		}
 		wallet = fileWallet
-
-		// Assert that the wallet is of type fswallet.Wallet to use CreateWallet method
-		fsWallet, ok := wallet.(fswallet.Wallet)
-		if !ok {
-			return fmt.Errorf("wallet does not implement fswallet.Wallet")
-		}
-
-		router.HandleFunc("/wallets/create", createWalletHandler(fsWallet)).Methods("POST")
-
 	default:
 		return i18n.NewError(ctx, signermsgs.MsgNoWalletEnabled)
 	}
+
+	router.HandleFunc("/wallets/create", createWalletHandler(wallet)).Methods("POST")
 
 	server, err := rpcserver.NewServer(ctx, wallet)
 	if err != nil {
@@ -137,12 +130,11 @@ func run() error {
 	}
 
 	srv := &http.Server{
-		Addr:    ":8555",
-		Handler: router,
-		// Good practice: enforce timeouts for servers you create!
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:         ":8555",
+		Handler:      router,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  90 * time.Second,
 	}
 
 	go func() {
@@ -155,6 +147,7 @@ func run() error {
 }
 
 type CreateWalletRequest struct {
+	Password   string `json:"password,omitempty"`
 	PrivateKey string `json:"privateKey,omitempty"`
 }
 
@@ -162,7 +155,7 @@ type CreateWalletResponse struct {
 	Address string `json:"address"`
 }
 
-func createWalletHandler(wallet fswallet.Wallet) http.HandlerFunc {
+func createWalletHandler(wallet ethsigner.Wallet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req CreateWalletRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -171,7 +164,7 @@ func createWalletHandler(wallet fswallet.Wallet) http.HandlerFunc {
 		}
 
 		ctx := context.Background()
-		address, err := wallet.CreateWallet(ctx, req.PrivateKey)
+		address, err := wallet.CreateWallet(ctx, req.Password, req.PrivateKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -179,6 +172,10 @@ func createWalletHandler(wallet fswallet.Wallet) http.HandlerFunc {
 
 		resp := CreateWalletResponse{
 			Address: address.String(),
+		}
+
+		if err := wallet.Refresh(ctx); err != nil {
+			log.L(ctx).Errorf("Failed to refresh wallet: %s", err)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

@@ -31,6 +31,10 @@ type Wallet interface {
 	GetAccounts(ctx context.Context) ([]*ethtypes.Address0xHex /* no checksum on returned values */, error)
 	Refresh(ctx context.Context) error
 	Close() error
+
+	// @willianpatrick - 23/07/2024
+	// CreateWallet optional private key
+	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error)
 }
 
 type WalletTypedData interface {

@@ -45,6 +45,7 @@ func newTestServer(t *testing.T) (string, *rpcServer, func()) {
 	signerconfig.ServerConfig.Set(httpserver.HTTPConfAddress, "127.0.0.1")
 
 	w := &ethsignermocks.Wallet{}
+	// w.On("CreateWallet", mock.Anything, mock.Anything, mock.Anything).Return(ethtypes.Address0xHex{}, nil)
 
 	ss, err := NewServer(context.Background(), w)
 	assert.NoError(t, err)

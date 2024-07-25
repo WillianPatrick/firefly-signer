@@ -110,6 +110,29 @@ func (_m *Wallet) Sign(ctx context.Context, txn *ethsigner.Transaction, chainID 
 	return r0, r1
 }
 
+func (_m *Wallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) {
+	ret := _m.Called(ctx, password, privateKeyHex)
+
+	var r0 ethtypes.Address0xHex
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (ethtypes.Address0xHex, error)); ok {
+		return rf(ctx, password, privateKeyHex)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) ethtypes.Address0xHex); ok {
+		r0 = rf(ctx, password, privateKeyHex)
+	} else {
+		r0 = ret.Get(0).(ethtypes.Address0xHex)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, password, privateKeyHex)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // NewWallet creates a new instance of Wallet. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewWallet(t interface {

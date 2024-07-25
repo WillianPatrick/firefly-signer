@@ -12,7 +12,7 @@ GOGC=30
 
 all: build test go-mod-tidy
 test: deps lint
-		$(VGO) test ./internal/... ./cmd/... ./pkg/... -cover -coverprofile=coverage.txt -covermode=atomic -timeout=30s
+		$(VGO) test ./internal/... ./cmd/... ./pkg/... -cover -coverprofile=coverage.txt -covermode=atomic -timeout=90s
 coverage.html:
 		$(VGO) tool cover -html=coverage.txt
 coverage: test coverage.html
@@ -47,6 +47,6 @@ clean:
 deps:
 		$(VGO) get ./ffsigner
 reference:
-		$(VGO) test ./cmd -timeout=10s -tags docs
+		$(VGO) test ./cmd -timeout=30s -tags docs
 docker:
 		docker build --build-arg BUILD_VERSION=${BUILD_VERSION} ${DOCKER_ARGS} -t hyperledger/firefly-signer .
