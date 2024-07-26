@@ -18,6 +18,7 @@ package azurekeyvault
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"strings"
@@ -28,6 +29,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azkeys"
 	"github.com/Azure/azure-sdk-for-go/sdk/keyvault/azsecrets"
+	"github.com/hyperledger/firefly-common/pkg/log"
 	"github.com/hyperledger/firefly-signer/pkg/eip712"
 	"github.com/hyperledger/firefly-signer/pkg/ethsigner"
 	"github.com/hyperledger/firefly-signer/pkg/ethtypes"
@@ -79,11 +81,25 @@ type azWallet struct {
 }
 
 func (w *azWallet) Sign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
+	if !w.conf.RemoteSign {
+		return w.LocalSign(ctx, txn, chainID)
+	}
+	return w.RemoteSign(ctx, txn, chainID)
+}
+
+func (w *azWallet) LocalSign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
+	unsignedTxBytes, err := json.Marshal(txn)
+	if err != nil {
+		return nil, err
+	}
+
 	var from ethtypes.Address0xHex
 	if err := json.Unmarshal(txn.From, &from); err != nil {
 		return nil, err
 	}
 	key := from.String()
+	log.L(ctx).Debugf("AzureKeyVault - Local Sign - Chain ID: %d - From: %s, Unsigned transaction: %s", chainID, key, string(unsignedTxBytes))
+
 	item := w.signerCache.Get(key)
 	var privateKey string
 
@@ -98,17 +114,61 @@ func (w *azWallet) Sign(ctx context.Context, txn *ethsigner.Transaction, chainID
 			return nil, err
 		}
 		privateKey = *secretResp.Value
+		w.signerCache.Set(key, privateKey, w.signerCacheTTL)
 	}
 
-	w.signerCache.Set(key, privateKey, w.signerCacheTTL)
-
-	keypair, err := secp256k1.NewSecp256k1KeyPair([]byte(privateKey))
+	privateKeyBytes, err := hex.DecodeString(privateKey)
 	if err != nil {
 		return nil, err
 	}
 
-	txn.Nonce = ethtypes.NewHexInteger64(txn.Nonce.Int64() - 1)
-	return txn.Sign(keypair, chainID)
+	keypair, err := secp256k1.NewSecp256k1KeyPair(privateKeyBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	signedTx, err := txn.Sign(keypair, chainID)
+	if err != nil {
+		return nil, err
+	}
+
+	log.L(ctx).Debugf("AzureKeyVault - Local Sign - Chain ID: %d - From: %s, Signed transaction: %s", chainID, key, hex.EncodeToString(signedTx))
+
+	return signedTx, nil
+}
+
+func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
+	unsignedTxBytes, err := json.Marshal(txn)
+	if err != nil {
+		return nil, err
+	}
+
+	var from ethtypes.Address0xHex
+	if err := json.Unmarshal(txn.From, &from); err != nil {
+		return nil, err
+	}
+	key := from.String()
+	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Unsigned transaction: %s", chainID, key, string(unsignedTxBytes))
+
+	hasher := sha256.New()
+	hasher.Write(unsignedTxBytes)
+	digest := hasher.Sum(nil)
+
+	signParameters := azkeys.SignParameters{
+		Algorithm: to.Ptr(azkeys.JSONWebKeySignatureAlgorithmES256K),
+		Value:     digest,
+	}
+
+	// Sign the digest using the key in Azure Key Vault
+	signResult, err := w.KeyClient.Sign(ctx, strings.TrimPrefix(key, "0x"), "", signParameters, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Log the signed transaction as text
+	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Signed transaction: %s", chainID, key, hex.EncodeToString(signResult.Result))
+
+	return signResult.Result, nil
 }
 
 func (w *azWallet) SignTypedDataV4(ctx context.Context, from ethtypes.Address0xHex, payload *eip712.TypedData) (*ethsigner.EIP712Result, error) {

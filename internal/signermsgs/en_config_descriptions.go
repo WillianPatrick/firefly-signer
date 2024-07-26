@@ -59,6 +59,7 @@ var (
 	ConfigAzureKeyVaultClientID          = ffc("config.azureKeyVault.clientID", "The Client ID for the Azure Key Vault", "string")
 	ConfigAzureKeyVaultClientSecret      = ffc("config.azureKeyVault.clientSecret", "The Client Secret for the Azure Key Vault", "string")
 	ConfigAzureKeyVaultTenantID          = ffc("config.azureKeyVault.tenantID", "The Tenant ID for the Azure Key Vault", "string")
+	ConfigAzureKeyVaultRemoteSign        = ffc("config.azureKeyVault.remoteSign", "Enable, disable remote sign transactions", "boolean")
 	ConfigAzureKeyVaultCacheMaxSize      = ffc("config.azureKeyVault.cache.maxSize", "The maximum size of the cache for Azure Key Vault", "number")
 	ConfigAzureKeyVaultCacheItemsToPrune = ffc("config.azureKeyVault.cache.itemsToPrune", "The number of items to prune from the cache when it exceeds the maximum size", "number")
 	ConfigAzureKeyVaultCacheTTL          = ffc("config.azureKeyVault.cache.ttl", "The TTL (time-to-live) for cache entries in Azure Key Vault", "duration")

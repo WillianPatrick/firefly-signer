@@ -112,11 +112,29 @@ type fsWallet struct {
 }
 
 func (w *fsWallet) Sign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
+	unsignedTxBytes, err := json.Marshal(txn)
+	if err != nil {
+		return nil, err
+	}
+
+	var from ethtypes.Address0xHex
+	if err := json.Unmarshal(txn.From, &from); err != nil {
+		return nil, err
+	}
+	key := from.String()
+
 	keypair, err := w.getSignerForJSONAccount(ctx, txn.From)
 	if err != nil {
 		return nil, err
 	}
-	return txn.Sign(keypair, chainID)
+	log.L(ctx).Debugf("FileWallet - Local Sign - Chain ID: %d - From: %s, Unsigned transaction: %s", chainID, key, string(unsignedTxBytes))
+	signedTx, err := txn.Sign(keypair, chainID)
+	if err != nil {
+		return nil, err
+	}
+	log.L(ctx).Debugf("FileWallet - Local Sign - Chain ID: %d - From: %s, Signed transaction: %s", chainID, key, hex.EncodeToString(signedTx))
+
+	return signedTx, nil
 }
 
 func (w *fsWallet) SignTypedDataV4(ctx context.Context, from ethtypes.Address0xHex, payload *eip712.TypedData) (*ethsigner.EIP712Result, error) {
