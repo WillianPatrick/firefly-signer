@@ -7,3 +7,4 @@ __debug*
 .vscode/*.log
 test/keystore_toml/ignore_dir
 .fake
+download_deps.ps1

@@ -95,23 +95,11 @@ func run() error {
 
 	switch {
 	case config.GetBool(signerconfig.KeyVaultEnabled):
-		vaultURL := config.GetString("azureKeyVault.vaultURL")
-		clientID := config.GetString("azureKeyVault.clientID")
-		clientSecret := config.GetString("azureKeyVault.clientSecret")
-		tenantID := config.GetString("azureKeyVault.tenantID")
-
-		cache := map[string]interface{}{
-			"maxSize":      config.GetInt("azureKeyVault.cache.maxSize"),
-			"itemsToPrune": config.GetInt("azureKeyVault.cache.itemsToPrune"),
-			"ttl":          config.GetDuration("azureKeyVault.cache.ttl"),
-		}
-
-		keyVaultClient, err := azurekeyvault.NewAzureKeyVaultClient(vaultURL, clientID, clientSecret, tenantID, cache)
+		azureWallet, err := azurekeyvault.NewAzureKeyVaultWallet(ctx, azurekeyvault.ReadConfig(signerconfig.KeyVaultConfig))
 		if err != nil {
 			return err
 		}
-		wallet = keyVaultClient
-
+		wallet = azureWallet
 	case config.GetBool(signerconfig.FileWalletEnabled):
 		fileWallet, err := fswallet.NewFilesystemWallet(ctx, fswallet.ReadConfig(signerconfig.FileWalletConfig))
 		if err != nil {

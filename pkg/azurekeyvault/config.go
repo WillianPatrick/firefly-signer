@@ -16,7 +16,11 @@
 
 package azurekeyvault
 
-import "github.com/hyperledger/firefly-common/pkg/config"
+import (
+	"time"
+
+	"github.com/hyperledger/firefly-common/pkg/config"
+)
 
 var (
 	VaultURL          = config.AddRootKey("vaultURL")
@@ -44,10 +48,24 @@ func ReadConfig(section config.Section) *Config {
 		ClientID:     section.GetString(string(ClientID)),
 		ClientSecret: section.GetString(string(ClientSecret)),
 		TenantID:     section.GetString(string(TenantID)),
-		Cache: map[string]interface{}{
-			"maxSize":      section.GetInt64(string(CacheMaxSize)),
-			"itemsToPrune": uint32(section.GetInt(string(CacheItemsToPrune))),
-			"ttl":          section.GetDuration(string(CacheTTL)),
+		Cache: ConfigCache{
+			MaxSize:      section.GetInt64(string(CacheMaxSize)),
+			ItemsToPrune: uint32(section.GetInt(string(CacheItemsToPrune))),
+			TTL:          section.GetDuration(string(CacheTTL)),
 		},
 	}
+}
+
+type ConfigCache struct {
+	MaxSize      int64
+	ItemsToPrune uint32
+	TTL          time.Duration
+}
+
+type Config struct {
+	VaultURL     string
+	ClientID     string
+	ClientSecret string
+	TenantID     string
+	Cache        ConfigCache
 }

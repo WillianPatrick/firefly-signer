@@ -411,7 +411,7 @@ func (w *fsWallet) CreateWallet(ctx context.Context, password string, privateKey
 			return ethtypes.Address0xHex{}, err
 		}
 	} else {
-		privateKey, err := hex.DecodeString(privateKeyHex)
+		privateKey, err := hex.DecodeString(strings.TrimPrefix(privateKeyHex, "0x"))
 		if err != nil {
 			return ethtypes.Address0xHex{}, err
 		}
