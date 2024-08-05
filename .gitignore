@@ -8,3 +8,7 @@ __debug*
 test/keystore_toml/ignore_dir
 .fake
 download_deps.ps1
+deps
+firefly.ffsigner
+vendor.zip
+vendor/*

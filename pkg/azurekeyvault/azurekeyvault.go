@@ -34,7 +34,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/hyperledger/firefly-common/pkg/log"
 	"github.com/hyperledger/firefly-signer/pkg/eip712"
 	"github.com/hyperledger/firefly-signer/pkg/ethsigner"
@@ -104,7 +103,7 @@ func (w *azWallet) LocalSign(ctx context.Context, txn *ethsigner.Transaction, ch
 		return nil, err
 	}
 	key := from.String()
-	log.L(ctx).Debugf("AzureKeyVault - Local Sign - Chain ID: %d - From: %s, Unsigned transaction: %s", chainID, key, string(unsignedTxBytes))
+	log.L(ctx).Debugf("AzureKeyVault - Local Sign - Chain ID: %d - From: %s, Unsigned transaction tnx: %s", chainID, key, string(unsignedTxBytes))
 
 	item := w.signerCache.Get(key)
 	var privateKey string
@@ -230,7 +229,8 @@ func (w *azWallet) storeKeyPairInAzureKeyVault(ctx context.Context, keypair *sec
 }
 
 func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
-	unsignedTxBytes, err := json.Marshal(txn)
+
+	unsignedTxnJson, err := json.Marshal(txn)
 	if err != nil {
 		return nil, err
 	}
@@ -240,55 +240,89 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 		return nil, err
 	}
 	key := from.String()
-	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Unsigned transaction: %s", chainID, key, string(unsignedTxBytes))
+	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Unsigned transaction tnx: %s", chainID, key, string(unsignedTxnJson))
 
-	// Calculate the message hash
 	signer := types.NewEIP155Signer(big.NewInt(chainID))
-	tx := types.NewTransaction(
-		txn.Nonce.Uint64(),
-		common.HexToAddress(txn.To.String()),
-		txn.Value.BigInt(),
-		txn.GasLimit.Uint64(),
-		txn.GasPrice.BigInt(),
-		txn.Data,
-	)
-	hash := signer.Hash(tx)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    txn.Nonce.Uint64(),
+		To:       &common.Address{},
+		Value:    txn.Value.BigInt(),
+		Gas:      txn.GasLimit.Uint64(),
+		GasPrice: txn.GasPrice.BigInt(),
+		Data:     txn.Data,
+	})
 
+	unsignedTxJson, err := json.Marshal(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	hash := signer.Hash(tx)
 	signParameters := azkeys.SignParameters{
 		Algorithm: to.Ptr(azkeys.JSONWebKeySignatureAlgorithmES256K),
 		Value:     hash[:],
 	}
 
-	// Sign the digest using the key in Azure Key Vault
+	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Send RPC Transaction With Signature: %s", chainID, key, hex.EncodeToString(unsignedTxJson))
+
 	signResult, err := w.KeyClient.Sign(ctx, strings.TrimPrefix(key, "0x"), "", signParameters, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	signature := signResult.Result
-	if len(signature) != 64 {
-		return nil, errors.New("invalid signature length")
-	}
+	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Azure Result Signature (R,S): %s", hex.EncodeToString(signature))
 
+	// Extract r and s components from the signature
 	r := new(big.Int).SetBytes(signature[:32])
 	s := new(big.Int).SetBytes(signature[32:64])
+
+	// Ensure s is in the lower half of the curve order
+	curveOrder := crypto.S256().Params().N
+	halfOrder := new(big.Int).Rsh(curveOrder, 1)
+
+	if s.Cmp(halfOrder) > 0 {
+		s.Sub(curveOrder, s)
+	}
+
+	// Calculate recovery ID `v`
 	v := byte(chainID*2 + 35 + 27)
+	if s.Cmp(halfOrder) > 0 {
+		v++
+	}
 
-	// Use the `ethereum` package to construct a proper signed transaction
-	signedTx, err := tx.WithSignature(signer, append(append(r.Bytes(), s.Bytes()...), v))
+	sig := append(append(r.Bytes(), s.Bytes()...), v)
+
+	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Signature (R,S,V): %s", hex.EncodeToString(sig))
+
+	// pubKey, err := crypto.SigToPub(hash[:], sig)
 	if err != nil {
 		return nil, err
 	}
 
-	// RLP encode the signed transaction
-	signedTxBytes, err := rlp.EncodeToBytes(signedTx)
+	// if crypto.VerifySignature(crypto.FromECDSAPub(pubKey), hash[:], signature) {
+	signedTx, err := tx.WithSignature(signer, sig)
 	if err != nil {
 		return nil, err
 	}
 
-	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Signed transaction: %s", chainID, key, hex.EncodeToString(signedTxBytes))
+	signedTxBytes, err := signedTx.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+
+	signedTxJson, err := json.Marshal(signedTx)
+	if err != nil {
+		return nil, err
+	}
+
+	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Send RPC Transaction With Signature: %s", chainID, key, hex.EncodeToString(signedTxJson))
 
 	return signedTxBytes, nil
+	// }
+
+	// log.L(ctx).Errorf("Invalid signature!")
+	// return nil, errors.New("invalid signature")
 }
 
 func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethtypes.Address0xHex, error) {
@@ -310,10 +344,7 @@ func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethtype
 		return ethtypes.Address0xHex{}, err
 	}
 
-	// Derive the public key from the private key
 	pubKey := pk.Public().(*ecdsa.PublicKey)
-
-	// Generate the Ethereum address from the public key
 	keyname := crypto.PubkeyToAddress(*pubKey).Hex()
 
 	createKeyResponse, err := w.KeyClient.CreateKey(ctx, strings.TrimPrefix(keyname, "0x"), keyParams, nil)
@@ -349,18 +380,19 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 	if err != nil {
 		return ethtypes.Address0xHex{}, err
 	}
-	keypair, err := secp256k1.NewSecp256k1KeyPair(privateKey)
+
+	privateKeyECDSA, err := crypto.ToECDSA(privateKey)
 	if err != nil {
 		return ethtypes.Address0xHex{}, err
 	}
 
-	// Import the key into Azure Key Vault
+	publicKeyECDSA := privateKeyECDSA.Public().(*ecdsa.PublicKey)
 	jsonWebKey := azkeys.JSONWebKey{
 		Kty: to.Ptr(azkeys.JSONWebKeyTypeEC),
 		Crv: to.Ptr(azkeys.JSONWebKeyCurveNameP256K),
-		X:   keypair.PublicKeyBytes()[0:32],
-		Y:   keypair.PublicKeyBytes()[32:64],
-		D:   keypair.PrivateKeyBytes(),
+		X:   publicKeyECDSA.X.Bytes(),
+		Y:   publicKeyECDSA.Y.Bytes(),
+		D:   privateKey,
 		KeyOps: []*string{
 			to.Ptr(string(azkeys.JSONWebKeyOperationSign)),
 			to.Ptr(string(azkeys.JSONWebKeyOperationVerify)),
@@ -372,12 +404,11 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 		Key:           &jsonWebKey,
 		KeyAttributes: &azkeys.KeyAttributes{Enabled: to.Ptr(true)},
 		Tags: map[string]*string{
-			"EthereumAddress": to.Ptr(keypair.Address.String()),
+			"EthereumAddress": to.Ptr(crypto.PubkeyToAddress(*publicKeyECDSA).Hex()),
 		},
 	}
 
-	var importKeyResponse azkeys.ImportKeyResponse
-	importKeyResponse, err = w.KeyClient.ImportKey(ctx, strings.TrimPrefix(keypair.Address.String(), "0x"), importKeyParams, nil)
+	importKeyResponse, err := w.KeyClient.ImportKey(ctx, strings.TrimPrefix(crypto.PubkeyToAddress(*publicKeyECDSA).Hex(), "0x"), importKeyParams, nil)
 	if err != nil {
 		return ethtypes.Address0xHex{}, err
 	}
@@ -392,7 +423,7 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 	hash := crypto.Keccak256(publicKey)
 	address := common.BytesToAddress(hash[12:])
 
-	if ethtypes.Address0xHex(address) != keypair.Address {
+	if ethtypes.Address0xHex(address) != ethtypes.Address0xHex(crypto.PubkeyToAddress(*publicKeyECDSA).Bytes()) {
 		return ethtypes.Address0xHex{}, errors.New("Fail generate public key")
 	}
 
