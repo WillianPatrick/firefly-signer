@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -73,16 +74,19 @@ func NewAzureKeyVaultWallet(ctx context.Context, conf *Config) (ww Wallet, err e
 	w.signerCache = ccache.New(ccache.Configure().MaxSize(maxSize).ItemsToPrune(itemsToPrune))
 	w.Client = client
 	w.KeyClient = keyClient
+
 	return w, nil
 }
 
 type azWallet struct {
-	conf           Config
-	signerCache    *ccache.Cache
-	signerCacheTTL time.Duration
-	mux            sync.Mutex
-	Client         *azsecrets.Client
-	KeyClient      *azkeys.Client
+	conf             Config
+	signerCache      *ccache.Cache
+	signerCacheTTL   time.Duration
+	mux              sync.Mutex
+	Client           *azsecrets.Client
+	KeyClient        *azkeys.Client
+	stopRefresh      chan struct{}
+	addressToKeyName map[common.Address]string
 }
 
 func (w *azWallet) Sign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
@@ -168,6 +172,10 @@ func (w *azWallet) SignTypedDataV4(ctx context.Context, from ethtypes.Address0xH
 }
 
 func (w *azWallet) Initialize(ctx context.Context) error {
+	if w.conf.EnableRefresh {
+		w.startRefreshLoop(ctx)
+	}
+
 	return w.Refresh(ctx)
 }
 
@@ -176,13 +184,36 @@ func (w *azWallet) GetAccounts(_ context.Context) ([]*ethtypes.Address0xHex, err
 }
 
 func (w *azWallet) Refresh(ctx context.Context) error {
-	return nil
+	return w.refreshAddressToKeyNameMapping(ctx)
 }
 
+func (w *azWallet) startRefreshLoop(ctx context.Context) {
+	w.stopRefresh = make(chan struct{})
+
+	go func() {
+		ticker := time.NewTicker(w.conf.RefreshInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if err := w.refreshAddressToKeyNameMapping(ctx); err != nil {
+					log.L(ctx).Errorf("Failed to refresh address-to-keyname mapping: %v", err)
+				}
+			case <-w.stopRefresh:
+				return
+			}
+		}
+	}()
+}
+
+// Stop the refresh loop when the wallet is closed
 func (w *azWallet) Close() error {
+	if w.stopRefresh != nil {
+		close(w.stopRefresh)
+	}
 	return nil
 }
-
 func (w *azWallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) {
 	if !w.conf.RemoteSign {
 		return w.CreateSecret(ctx, password, privateKeyHex)
@@ -245,7 +276,7 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 	signer := types.NewEIP155Signer(big.NewInt(chainID))
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    txn.Nonce.Uint64(),
-		To:       &common.Address{},
+		To:       (*common.Address)(txn.To),
 		Value:    txn.Value.BigInt(),
 		Gas:      txn.GasLimit.Uint64(),
 		GasPrice: txn.GasPrice.BigInt(),
@@ -265,7 +296,7 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 
 	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Send RPC Transaction With Signature: %s", chainID, key, hex.EncodeToString(unsignedTxJson))
 
-	signResult, err := w.KeyClient.Sign(ctx, strings.TrimPrefix(key, "0x"), "", signParameters, nil)
+	signResult, err := w.KeyClient.Sign(ctx, w.addressToKeyName[(common.Address)(from)], "", signParameters, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -372,6 +403,8 @@ func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethtype
 		return ethtypes.Address0xHex{}, err
 	}
 
+	w.addressToKeyName[common.HexToAddress(address.Hex())] = strings.TrimPrefix(address.String(), "0x")
+
 	return ethtypes.Address0xHex(address), nil
 }
 
@@ -427,5 +460,74 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 		return ethtypes.Address0xHex{}, errors.New("Fail generate public key")
 	}
 
+	w.addressToKeyName[common.HexToAddress(address.Hex())] = strings.TrimPrefix(address.String(), "0x")
+
 	return ethtypes.Address0xHex(address), nil
+}
+
+func (w *azWallet) refreshAddressToKeyNameMapping(ctx context.Context) error {
+	log.L(ctx).Debugf("Updating mapping address...")
+
+	// Lock para segurança de concorrência
+	w.mux.Lock()
+	defer w.mux.Unlock()
+
+	// Use o método NewListKeysPager para criar um pager
+	pager := w.KeyClient.NewListKeysPager(nil)
+
+	// Mapa temporário para armazenar os dados atualizados
+	newAddressToKeyName := make(map[common.Address]string)
+
+	// Loop através de cada página
+	for pager.More() {
+		// Recupere a próxima página de propriedades de chave
+		pageResponse, err := pager.NextPage(ctx)
+		if err != nil {
+			return err // Trate o erro e saia se necessário
+		}
+
+		// Itera sobre as propriedades da chave na página atual
+		for _, keyItem := range pageResponse.Value {
+			// Acessa o ID e as tags da chave diretamente do KeyItem
+			if keyItem.Tags != nil {
+				if addr, ok := keyItem.Tags["EthereumAddress"]; ok {
+					// Extrai o nome da chave do KID
+					keyName := extractKeyNameFromKID(keyItem.KID)
+					if keyName != "" {
+						ca := common.HexToAddress(string(*addr))
+						newAddressToKeyName[ca] = strings.TrimPrefix(keyName, "0x")
+					}
+				}
+			}
+		}
+	}
+
+	// Atualiza o mapa de forma atômica
+	w.addressToKeyName = newAddressToKeyName
+	log.L(ctx).Debugf("Updated: %d address to mapping", len(w.addressToKeyName))
+
+	return nil
+}
+
+func extractKeyNameFromKID(kid *azkeys.ID) string {
+	if kid == nil {
+		return ""
+	}
+
+	// Supondo que KID seja uma struct com um campo 'ID' que contém a URL completa como uma string
+	fullURL := string(*kid)
+
+	// Analisa a URL para extrair o nome da chave
+	parsedURL, err := url.Parse(fullURL)
+	if err != nil {
+		return ""
+	}
+
+	// O caminho do KID é tipicamente /keys
+	// Divide o caminho para extrair o nome da chave
+	segments := strings.Split(parsedURL.Path, "/")
+	if len(segments) >= 3 {
+		return segments[2] // O nome da chave é o terceiro segmento
+	}
+	return ""
 }

@@ -110,6 +110,7 @@ func run() error {
 		return i18n.NewError(ctx, signermsgs.MsgNoWalletEnabled)
 	}
 
+	router.HandleFunc("/wallets/refresh", refreshWalletHandler(wallet)).Methods("POST")
 	router.HandleFunc("/wallets/create", createWalletHandler(wallet)).Methods("POST")
 
 	server, err := rpcserver.NewServer(ctx, wallet)
@@ -170,6 +171,18 @@ func createWalletHandler(wallet ethsigner.Wallet) http.HandlerFunc {
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			log.L(ctx).Errorf("Failed to encode response: %s", err)
 		}
+	}
+}
+
+func refreshWalletHandler(wallet ethsigner.Wallet) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if err := wallet.Refresh(ctx); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to refresh wallet: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Wallet mapping refreshed successfully"))
 	}
 }
 

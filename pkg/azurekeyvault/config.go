@@ -31,6 +31,8 @@ var (
 	CacheMaxSize      = config.AddRootKey("cache.maxSize")
 	CacheItemsToPrune = config.AddRootKey("cache.itemsToPrune")
 	CacheTTL          = config.AddRootKey("cache.ttl")
+	RefreshInterval   = config.AddRootKey("refreshInterval")
+	EnableRefresh     = config.AddRootKey("enableRefresh")
 )
 
 func InitConfig(section config.Section) {
@@ -42,6 +44,8 @@ func InitConfig(section config.Section) {
 	section.AddKnownKey(string(CacheItemsToPrune))
 	section.AddKnownKey(string(CacheTTL))
 	section.AddKnownKey(string(RemoteSign))
+	section.AddKnownKey(string(RefreshInterval))
+	section.AddKnownKey(string(EnableRefresh))
 }
 
 func ReadConfig(section config.Section) *Config {
@@ -57,6 +61,9 @@ func ReadConfig(section config.Section) *Config {
 			ItemsToPrune: uint32(section.GetInt(string(CacheItemsToPrune))),
 			TTL:          section.GetDuration(string(CacheTTL)),
 		},
+
+		RefreshInterval: section.GetDuration(string(RefreshInterval)),
+		EnableRefresh:   section.GetBool(string(EnableRefresh)),
 	}
 }
 
@@ -67,10 +74,12 @@ type ConfigCache struct {
 }
 
 type Config struct {
-	VaultURL     string
-	ClientID     string
-	ClientSecret string
-	TenantID     string
-	RemoteSign   bool
-	Cache        ConfigCache
+	VaultURL        string
+	ClientID        string
+	ClientSecret    string
+	TenantID        string
+	RemoteSign      bool
+	Cache           ConfigCache
+	RefreshInterval time.Duration
+	EnableRefresh   bool
 }
