@@ -63,6 +63,8 @@ var (
 	ConfigAzureKeyVaultCacheMaxSize      = ffc("config.azureKeyVault.cache.maxSize", "The maximum size of the cache for Azure Key Vault", "number")
 	ConfigAzureKeyVaultCacheItemsToPrune = ffc("config.azureKeyVault.cache.itemsToPrune", "The number of items to prune from the cache when it exceeds the maximum size", "number")
 	ConfigAzureKeyVaultCacheTTL          = ffc("config.azureKeyVault.cache.ttl", "The TTL (time-to-live) for cache entries in Azure Key Vault", "duration")
+	ConfigAzureKeyVaultEnableRefresh     = ffc("config.azureKeyVault.enableRefresh", "Enable automatic refresh mapping kayname and wallet address", "boolean")
+	ConfigAzureKeyVaultRefreshInterval   = ffc("config.azureKeyVault.refreshInterval", "Interval time to automatic refresh", "duration")
 
 	ConfigCacheItemsToPrune = ffc("config.cache.itemsToPrune", "The number of items to prune from the cache when it exceeds the maximum size", "number")
 	ConfigCacheMaxSize      = ffc("config.cache.maxSize", "The maximum size of the cache for Azure Key Vault", "number")

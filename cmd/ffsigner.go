@@ -163,10 +163,6 @@ func createWalletHandler(wallet ethsigner.Wallet) http.HandlerFunc {
 			Address: address.String(),
 		}
 
-		if err := wallet.Refresh(ctx); err != nil {
-			log.L(ctx).Errorf("Failed to refresh wallet: %s", err)
-		}
-
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			log.L(ctx).Errorf("Failed to encode response: %s", err)
