@@ -31,8 +31,8 @@ var (
 	BackendChainID                    = ffc("backend.chainId")
 	FileWalletEnabled                 = ffc("fileWallet.enabled")
 	KeyVaultEnabled                   = ffc("azureKeyVault.enabled")
-	KeyVaultMappingKeysEnabled        = ffc("mappingKeyAddress.enable")
-	KeyVaultMappingKeysRefreshEnabled = ffc("mappingKeyAddress.refresh.enable")
+	KeyVaultMappingKeysEnabled        = ffc("azureKeyVault.mappingKeyAddress.enabled")
+	KeyVaultMappingKeysRefreshEnabled = ffc("azureKeyVault.mappingKeyAddress.refresh.enabled")
 )
 
 var ServerConfig config.Section
