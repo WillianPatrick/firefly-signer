@@ -23,16 +23,17 @@ import (
 )
 
 var (
-	VaultURL          = config.AddRootKey("vaultURL")
-	ClientID          = config.AddRootKey("clientID")
-	ClientSecret      = config.AddRootKey("clientSecret")
-	TenantID          = config.AddRootKey("tenantID")
-	RemoteSign        = config.AddRootKey("remoteSign")
-	CacheMaxSize      = config.AddRootKey("cache.maxSize")
-	CacheItemsToPrune = config.AddRootKey("cache.itemsToPrune")
-	CacheTTL          = config.AddRootKey("cache.ttl")
-	RefreshInterval   = config.AddRootKey("refreshInterval")
-	EnableRefresh     = config.AddRootKey("enableRefresh")
+	VaultURL                         = config.AddRootKey("vaultURL")
+	ClientID                         = config.AddRootKey("clientID")
+	ClientSecret                     = config.AddRootKey("clientSecret")
+	TenantID                         = config.AddRootKey("tenantID")
+	RemoteSign                       = config.AddRootKey("remoteSign")
+	CacheMaxSize                     = config.AddRootKey("cache.maxSize")
+	CacheItemsToPrune                = config.AddRootKey("cache.itemsToPrune")
+	CacheTTL                         = config.AddRootKey("cache.ttl")
+	MappingKeyAddressEnable          = config.AddRootKey("mappingKeyAddress.enable")
+	MappingKeyAddressRefreshEnabled  = config.AddRootKey("mappingKeyAddress.refresh.enable")
+	MappingKeyAddressRefreshInterval = config.AddRootKey("mappingKeyAddress.refresh.interval")
 )
 
 func InitConfig(section config.Section) {
@@ -44,8 +45,9 @@ func InitConfig(section config.Section) {
 	section.AddKnownKey(string(CacheItemsToPrune))
 	section.AddKnownKey(string(CacheTTL))
 	section.AddKnownKey(string(RemoteSign))
-	section.AddKnownKey(string(RefreshInterval))
-	section.AddKnownKey(string(EnableRefresh))
+	section.AddKnownKey(string(MappingKeyAddressEnable))
+	section.AddKnownKey(string(MappingKeyAddressRefreshEnabled))
+	section.AddKnownKey(string(MappingKeyAddressRefreshInterval))
 }
 
 func ReadConfig(section config.Section) *Config {
@@ -62,9 +64,24 @@ func ReadConfig(section config.Section) *Config {
 			TTL:          section.GetDuration(string(CacheTTL)),
 		},
 
-		RefreshInterval: section.GetDuration(string(RefreshInterval)),
-		EnableRefresh:   section.GetBool(string(EnableRefresh)),
+		MappingKeyAddress: MappingKeyAddress{
+			Enable: section.GetBool(string(MappingKeyAddressEnable)),
+			Refresh: MappingKeyAddressRefresh{
+				Enable:   section.GetBool(string(MappingKeyAddressRefreshEnabled)),
+				Interval: section.GetDuration(string(MappingKeyAddressRefreshInterval)),
+			},
+		},
 	}
+}
+
+type MappingKeyAddressRefresh struct {
+	Enable   bool
+	Interval time.Duration
+}
+
+type MappingKeyAddress struct {
+	Enable  bool
+	Refresh MappingKeyAddressRefresh
 }
 
 type ConfigCache struct {
@@ -74,12 +91,11 @@ type ConfigCache struct {
 }
 
 type Config struct {
-	VaultURL        string
-	ClientID        string
-	ClientSecret    string
-	TenantID        string
-	RemoteSign      bool
-	Cache           ConfigCache
-	RefreshInterval time.Duration
-	EnableRefresh   bool
+	VaultURL          string
+	ClientID          string
+	ClientSecret      string
+	TenantID          string
+	RemoteSign        bool
+	Cache             ConfigCache
+	MappingKeyAddress MappingKeyAddress
 }

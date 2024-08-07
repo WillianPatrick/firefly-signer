@@ -46,10 +46,11 @@ import (
 type Wallet interface {
 	ethsigner.WalletTypedData
 	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) // Add this method
+	AddMappingKeyAddress(key string, address string) error
 }
 
 func (w *azWallet) Initialize(ctx context.Context) error {
-	if w.conf.EnableRefresh {
+	if w.conf.MappingKeyAddress.Enable && w.conf.MappingKeyAddress.Refresh.Enable {
 		w.startRefreshLoop(ctx)
 	}
 
@@ -197,14 +198,18 @@ func (w *azWallet) Refresh(ctx context.Context) error {
 
 func (w *azWallet) startRefreshLoop(ctx context.Context) {
 
-	if !w.conf.EnableRefresh {
+	if !w.conf.MappingKeyAddress.Enable || !w.conf.MappingKeyAddress.Refresh.Enable {
+		return
+	}
+
+	if w.conf.MappingKeyAddress.Refresh.Interval <= 0 {
 		return
 	}
 
 	w.stopRefresh = make(chan struct{})
 
 	go func() {
-		ticker := time.NewTicker(w.conf.RefreshInterval)
+		ticker := time.NewTicker(w.conf.MappingKeyAddress.Refresh.Interval)
 		defer ticker.Stop()
 
 		for {
@@ -287,7 +292,7 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 
 	signer := types.NewEIP155Signer(big.NewInt(chainID))
 	tx := types.NewTx(&types.LegacyTx{
-		Nonce:    txn.Nonce.Uint64(),
+		Nonce:    0,
 		To:       (*common.Address)(txn.To),
 		Value:    txn.Value.BigInt(),
 		Gas:      txn.GasLimit.Uint64(),
@@ -412,7 +417,9 @@ func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethtype
 		return ethtypes.Address0xHex{}, err
 	}
 
-	w.addressToKeyName[common.HexToAddress(address.Hex())] = strings.TrimPrefix(address.String(), "0x")
+	if w.conf.MappingKeyAddress.Enable {
+		w.addressToKeyName[common.HexToAddress(address.Hex())] = strings.TrimPrefix(address.String(), "0x")
+	}
 
 	return ethtypes.Address0xHex(address), nil
 }
@@ -469,9 +476,16 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 		return ethtypes.Address0xHex{}, errors.New("Fail generate public key")
 	}
 
-	w.addressToKeyName[common.HexToAddress(address.Hex())] = strings.TrimPrefix(address.String(), "0x")
+	if w.conf.MappingKeyAddress.Enable {
+		w.addressToKeyName[common.HexToAddress(address.Hex())] = strings.TrimPrefix(address.String(), "0x")
+	}
 
 	return ethtypes.Address0xHex(address), nil
+}
+
+func (w *azWallet) AddMappingKeyAddress(key string, address string) error {
+	w.addressToKeyName[common.HexToAddress(string(address))] = strings.TrimPrefix(key, "0x")
+	return nil
 }
 
 func (w *azWallet) refreshAddressToKeyNameMapping(ctx context.Context) error {
@@ -494,9 +508,6 @@ func (w *azWallet) refreshAddressToKeyNameMapping(ctx context.Context) error {
 							ca := common.HexToAddress(string(*addr))
 							if _, exists := w.addressToKeyName[ca]; !exists {
 								w.addressToKeyName[ca] = strings.TrimPrefix(keyName, "0x")
-								log.L(ctx).Debugf("Added mapping for address: %s", ca.Hex())
-							} else {
-								log.L(ctx).Debugf("Address already exists in mapping: %s", ca.Hex())
 							}
 						}
 					}

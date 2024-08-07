@@ -92,14 +92,15 @@ func run() error {
 	}()
 
 	var wallet ethsigner.Wallet
+	var aZwallet azurekeyvault.Wallet
 
 	switch {
 	case config.GetBool(signerconfig.KeyVaultEnabled):
-		azureWallet, err := azurekeyvault.NewAzureKeyVaultWallet(ctx, azurekeyvault.ReadConfig(signerconfig.KeyVaultConfig))
+		aZwallet, err = azurekeyvault.NewAzureKeyVaultWallet(ctx, azurekeyvault.ReadConfig(signerconfig.KeyVaultConfig))
 		if err != nil {
 			return err
 		}
-		wallet = azureWallet
+		wallet = aZwallet
 	case config.GetBool(signerconfig.FileWalletEnabled):
 		fileWallet, err := fswallet.NewFilesystemWallet(ctx, fswallet.ReadConfig(signerconfig.FileWalletConfig))
 		if err != nil {
@@ -110,6 +111,7 @@ func run() error {
 		return i18n.NewError(ctx, signermsgs.MsgNoWalletEnabled)
 	}
 
+	router.HandleFunc("/wallets/mapping", addMappingKeyAddressHandler(aZwallet)).Methods("POST")
 	router.HandleFunc("/wallets/refresh", refreshWalletHandler(wallet)).Methods("POST")
 	router.HandleFunc("/wallets/create", createWalletHandler(wallet)).Methods("POST")
 
@@ -138,6 +140,11 @@ func run() error {
 type CreateWalletRequest struct {
 	Password   string `json:"password,omitempty"`
 	PrivateKey string `json:"privateKey,omitempty"`
+}
+
+type AddKeyAddressMappingRequest struct {
+	KeyName string `json:"keyname,omitempty"`
+	Address string `json:"address,omitempty"`
 }
 
 type CreateWalletResponse struct {
@@ -179,6 +186,23 @@ func refreshWalletHandler(wallet ethsigner.Wallet) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Wallet mapping refreshed successfully"))
+	}
+}
+
+func addMappingKeyAddressHandler(wallet azurekeyvault.Wallet) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req AddKeyAddressMappingRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if err := wallet.AddMappingKeyAddress(req.KeyName, req.Address); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to add key address to mapping: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Key Address added mapping successfully"))
 	}
 }
 
