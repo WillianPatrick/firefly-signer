@@ -421,7 +421,7 @@ func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethtype
 		return ethtypes.Address0xHex{}, err
 	}
 
-	if w.conf.MappingKeyAddress.Enable {
+	if w.conf.MappingKeyAddress.Enabled {
 		w.addressToKeyName[common.HexToAddress(address.Hex())] = strings.TrimPrefix(address.String(), "0x")
 	}
 
@@ -480,7 +480,7 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 		return ethtypes.Address0xHex{}, errors.New("Fail generate public key")
 	}
 
-	if w.conf.MappingKeyAddress.Enable {
+	if w.conf.MappingKeyAddress.Enabled {
 		w.addressToKeyName[common.HexToAddress(address.Hex())] = strings.TrimPrefix(address.String(), "0x")
 	}
 
@@ -488,7 +488,7 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 }
 
 func (w *azWallet) AddMappingKeyAddress(key string, address string) error {
-	if !w.conf.MappingKeyAddress.Enable {
+	if !w.conf.MappingKeyAddress.Enabled {
 		return errors.New("Mapping feature not enabled")
 	}
 	w.addressToKeyName[common.HexToAddress(string(address))] = strings.TrimPrefix(key, "0x")
