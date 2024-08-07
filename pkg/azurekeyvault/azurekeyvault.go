@@ -193,6 +193,10 @@ func (w *azWallet) GetAccounts(_ context.Context) ([]*ethtypes.Address0xHex, err
 }
 
 func (w *azWallet) Refresh(ctx context.Context) error {
+	if !w.conf.MappingKeyAddress.Enable || !w.conf.MappingKeyAddress.Refresh.Enable {
+		return nil
+	}
+
 	return w.refreshAddressToKeyNameMapping(ctx)
 }
 
@@ -484,6 +488,9 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 }
 
 func (w *azWallet) AddMappingKeyAddress(key string, address string) error {
+	if !w.conf.MappingKeyAddress.Enable {
+		return errors.New("Mapping feature not enabled")
+	}
 	w.addressToKeyName[common.HexToAddress(string(address))] = strings.TrimPrefix(key, "0x")
 	return nil
 }

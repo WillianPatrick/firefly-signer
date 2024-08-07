@@ -101,6 +101,14 @@ func run() error {
 			return err
 		}
 		wallet = aZwallet
+
+		if config.GetBool(signerconfig.KeyVaultMappingKeysEnabled) {
+			router.HandleFunc("/wallets/mapping", addMappingKeyAddressHandler(aZwallet)).Methods("POST")
+			if config.GetBool(signerconfig.KeyVaultMappingKeysRefreshEnabled) {
+				router.HandleFunc("/wallets/refresh", refreshWalletHandler(wallet)).Methods("POST")
+			}
+		}
+
 	case config.GetBool(signerconfig.FileWalletEnabled):
 		fileWallet, err := fswallet.NewFilesystemWallet(ctx, fswallet.ReadConfig(signerconfig.FileWalletConfig))
 		if err != nil {
@@ -111,8 +119,6 @@ func run() error {
 		return i18n.NewError(ctx, signermsgs.MsgNoWalletEnabled)
 	}
 
-	router.HandleFunc("/wallets/mapping", addMappingKeyAddressHandler(aZwallet)).Methods("POST")
-	router.HandleFunc("/wallets/refresh", refreshWalletHandler(wallet)).Methods("POST")
 	router.HandleFunc("/wallets/create", createWalletHandler(wallet)).Methods("POST")
 
 	server, err := rpcserver.NewServer(ctx, wallet)

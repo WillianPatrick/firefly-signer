@@ -28,9 +28,11 @@ import (
 var ffc = config.AddRootKey
 
 var (
-	BackendChainID    = ffc("backend.chainId")
-	FileWalletEnabled = ffc("fileWallet.enabled")
-	KeyVaultEnabled   = ffc("azureKeyVault.enabled")
+	BackendChainID                    = ffc("backend.chainId")
+	FileWalletEnabled                 = ffc("fileWallet.enabled")
+	KeyVaultEnabled                   = ffc("azureKeyVault.enabled")
+	KeyVaultMappingKeysEnabled        = ffc("mappingKeyAddress.enable")
+	KeyVaultMappingKeysRefreshEnabled = ffc("mappingKeyAddress.refresh.enable")
 )
 
 var ServerConfig config.Section
