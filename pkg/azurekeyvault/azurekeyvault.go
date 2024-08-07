@@ -50,7 +50,7 @@ type Wallet interface {
 }
 
 func (w *azWallet) Initialize(ctx context.Context) error {
-	if w.conf.MappingKeyAddress.Enable && w.conf.MappingKeyAddress.Refresh.Enable {
+	if w.conf.MappingKeyAddress.Enabled && w.conf.MappingKeyAddress.Refresh.Enabled {
 		w.startRefreshLoop(ctx)
 	}
 
@@ -193,7 +193,7 @@ func (w *azWallet) GetAccounts(_ context.Context) ([]*ethtypes.Address0xHex, err
 }
 
 func (w *azWallet) Refresh(ctx context.Context) error {
-	if !w.conf.MappingKeyAddress.Enable || !w.conf.MappingKeyAddress.Refresh.Enable {
+	if !w.conf.MappingKeyAddress.Enabled {
 		return nil
 	}
 
@@ -202,7 +202,7 @@ func (w *azWallet) Refresh(ctx context.Context) error {
 
 func (w *azWallet) startRefreshLoop(ctx context.Context) {
 
-	if !w.conf.MappingKeyAddress.Enable || !w.conf.MappingKeyAddress.Refresh.Enable {
+	if !w.conf.MappingKeyAddress.Enabled || !w.conf.MappingKeyAddress.Refresh.Enabled {
 		return
 	}
 
@@ -296,7 +296,7 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 
 	signer := types.NewEIP155Signer(big.NewInt(chainID))
 	tx := types.NewTx(&types.LegacyTx{
-		Nonce:    0,
+		Nonce:    txn.Nonce.Uint64(),
 		To:       (*common.Address)(txn.To),
 		Value:    txn.Value.BigInt(),
 		Gas:      txn.GasLimit.Uint64(),

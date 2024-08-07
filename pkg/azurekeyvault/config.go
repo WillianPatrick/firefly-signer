@@ -31,8 +31,8 @@ var (
 	CacheMaxSize                     = config.AddRootKey("cache.maxSize")
 	CacheItemsToPrune                = config.AddRootKey("cache.itemsToPrune")
 	CacheTTL                         = config.AddRootKey("cache.ttl")
-	MappingKeyAddressEnable          = config.AddRootKey("mappingKeyAddress.enable")
-	MappingKeyAddressRefreshEnabled  = config.AddRootKey("mappingKeyAddress.refresh.enable")
+	MappingKeyAddressEnabled         = config.AddRootKey("mappingKeyAddress.enabled")
+	MappingKeyAddressRefreshEnabled  = config.AddRootKey("mappingKeyAddress.refresh.enabled")
 	MappingKeyAddressRefreshInterval = config.AddRootKey("mappingKeyAddress.refresh.interval")
 )
 
@@ -45,7 +45,7 @@ func InitConfig(section config.Section) {
 	section.AddKnownKey(string(CacheItemsToPrune))
 	section.AddKnownKey(string(CacheTTL))
 	section.AddKnownKey(string(RemoteSign))
-	section.AddKnownKey(string(MappingKeyAddressEnable))
+	section.AddKnownKey(string(MappingKeyAddressEnabled))
 	section.AddKnownKey(string(MappingKeyAddressRefreshEnabled))
 	section.AddKnownKey(string(MappingKeyAddressRefreshInterval))
 }
@@ -65,9 +65,9 @@ func ReadConfig(section config.Section) *Config {
 		},
 
 		MappingKeyAddress: MappingKeyAddress{
-			Enable: section.GetBool(string(MappingKeyAddressEnable)),
+			Enabled: section.GetBool(string(MappingKeyAddressEnabled)),
 			Refresh: MappingKeyAddressRefresh{
-				Enable:   section.GetBool(string(MappingKeyAddressRefreshEnabled)),
+				Enabled:  section.GetBool(string(MappingKeyAddressRefreshEnabled)),
 				Interval: section.GetDuration(string(MappingKeyAddressRefreshInterval)),
 			},
 		},
@@ -75,12 +75,12 @@ func ReadConfig(section config.Section) *Config {
 }
 
 type MappingKeyAddressRefresh struct {
-	Enable   bool
+	Enabled  bool
 	Interval time.Duration
 }
 
 type MappingKeyAddress struct {
-	Enable  bool
+	Enabled bool
 	Refresh MappingKeyAddressRefresh
 }
 
