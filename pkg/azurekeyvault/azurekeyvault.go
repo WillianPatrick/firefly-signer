@@ -437,7 +437,7 @@ func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethsign
 
 	return ethsigner.CreateWalletResponse{
 		Address: address.String(),
-		KeyName: keyname,
+		KeyName: strings.TrimPrefix(keyname, "0x"),
 	}, nil
 }
 
