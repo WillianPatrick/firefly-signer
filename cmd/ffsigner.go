@@ -143,37 +143,19 @@ func run() error {
 	return runServer(server)
 }
 
-type CreateWalletRequest struct {
-	Password   string `json:"password,omitempty"`
-	PrivateKey string `json:"privateKey,omitempty"`
-}
-
-type AddKeyAddressMappingRequest struct {
-	KeyName string `json:"keyname,omitempty"`
-	Address string `json:"address,omitempty"`
-}
-
-type CreateWalletResponse struct {
-	Address string `json:"address"`
-}
-
 func createWalletHandler(wallet ethsigner.Wallet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req CreateWalletRequest
+		var req ethsigner.CreateWalletRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		ctx := context.Background()
-		address, err := wallet.CreateWallet(ctx, req.Password, req.PrivateKey)
+		resp, err := wallet.CreateWallet(ctx, req.Password, req.PrivateKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
-		}
-
-		resp := CreateWalletResponse{
-			Address: address.String(),
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -197,7 +179,7 @@ func refreshWalletHandler(wallet ethsigner.Wallet) http.HandlerFunc {
 
 func addMappingKeyAddressHandler(wallet azurekeyvault.Wallet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req AddKeyAddressMappingRequest
+		var req ethsigner.AddKeyAddressMappingRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

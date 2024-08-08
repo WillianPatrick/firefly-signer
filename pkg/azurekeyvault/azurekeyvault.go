@@ -45,7 +45,7 @@ import (
 
 type Wallet interface {
 	ethsigner.WalletTypedData
-	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) // Add this method
+	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) // Add this method
 	AddMappingKeyAddress(key string, address string) error
 }
 
@@ -235,11 +235,17 @@ func (w *azWallet) Close() error {
 	}
 	return nil
 }
-func (w *azWallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) {
+func (w *azWallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
 	if !w.conf.RemoteSign {
-		return w.CreateSecret(ctx, password, privateKeyHex)
+		r, _ := w.CreateSecret(ctx, password, privateKeyHex)
+		return ethsigner.CreateWalletResponse{
+			Address: r.String(),
+		}, nil
+
 	}
+
 	return w.CreateKey(ctx, privateKeyHex)
+
 }
 
 func (w *azWallet) CreateSecret(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) {
@@ -374,9 +380,13 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 
 }
 
-func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethtypes.Address0xHex, error) {
+func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
 	if privateKeyHex != "" {
-		return w.ImportKey(ctx, privateKeyHex)
+		addr, _ := w.ImportKey(ctx, privateKeyHex)
+		return ethsigner.CreateWalletResponse{
+			Address: strings.TrimPrefix(addr.String(), "0x"),
+			KeyName: addr.String(),
+		}, nil
 	}
 
 	keyParams := azkeys.CreateKeyParameters{
@@ -390,7 +400,7 @@ func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethtype
 
 	pk, err := crypto.GenerateKey()
 	if err != nil {
-		return ethtypes.Address0xHex{}, err
+		return ethsigner.CreateWalletResponse{}, err
 	}
 
 	pubKey := pk.Public().(*ecdsa.PublicKey)
@@ -398,14 +408,14 @@ func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethtype
 
 	createKeyResponse, err := w.KeyClient.CreateKey(ctx, strings.TrimPrefix(keyname, "0x"), keyParams, nil)
 	if err != nil {
-		return ethtypes.Address0xHex{}, err
+		return ethsigner.CreateWalletResponse{}, err
 	}
 
 	var publicKey []byte
 	publicKey = append(publicKey, createKeyResponse.Key.X...)
 	publicKey = append(publicKey, createKeyResponse.Key.Y...)
 	if len(publicKey) != 64 {
-		return ethtypes.Address0xHex{}, errors.New("invalid public key length")
+		return ethsigner.CreateWalletResponse{}, errors.New("invalid public key length")
 	}
 
 	hash := crypto.Keccak256(publicKey)
@@ -418,14 +428,17 @@ func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethtype
 		Tags: tags,
 	}, nil)
 	if err != nil {
-		return ethtypes.Address0xHex{}, err
+		return ethsigner.CreateWalletResponse{}, err
 	}
 
 	if w.conf.MappingKeyAddress.Enabled {
 		w.addressToKeyName[common.HexToAddress(address.Hex())] = strings.TrimPrefix(address.String(), "0x")
 	}
 
-	return ethtypes.Address0xHex(address), nil
+	return ethsigner.CreateWalletResponse{
+		Address: address.String(),
+		KeyName: keyname,
+	}, nil
 }
 
 func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtypes.Address0xHex, error) {
@@ -489,9 +502,9 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 
 func (w *azWallet) AddMappingKeyAddress(key string, address string) error {
 	if !w.conf.MappingKeyAddress.Enabled {
-		return errors.New("Mapping feature not enabled")
+		return errors.New("mapping feature not enabled")
 	}
-	w.addressToKeyName[common.HexToAddress(string(address))] = strings.TrimPrefix(key, "0x")
+	w.addressToKeyName[common.HexToAddress(address)] = strings.TrimPrefix(key, "0x")
 	return nil
 }
 
@@ -512,7 +525,7 @@ func (w *azWallet) refreshAddressToKeyNameMapping(ctx context.Context) error {
 				if keyName != "" {
 					if _, exists := w.addressToKeyName[(common.Address)(common.HexToAddress("0x"+keyName))]; !exists {
 						if addr, ok := keyItem.Tags["EthereumAddress"]; ok {
-							ca := common.HexToAddress(string(*addr))
+							ca := common.HexToAddress(*addr)
 							if _, exists := w.addressToKeyName[ca]; !exists {
 								w.addressToKeyName[ca] = strings.TrimPrefix(keyName, "0x")
 							}

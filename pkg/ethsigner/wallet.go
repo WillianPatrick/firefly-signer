@@ -34,10 +34,25 @@ type Wallet interface {
 
 	// @willianpatrick - 23/07/2024
 	// CreateWallet optional private key
-	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error)
+	CreateWallet(ctx context.Context, password string, privateKeyHex string) (CreateWalletResponse, error)
 }
 
 type WalletTypedData interface {
 	Wallet
 	SignTypedDataV4(ctx context.Context, from ethtypes.Address0xHex, payload *eip712.TypedData) (*EIP712Result, error)
+}
+
+type CreateWalletRequest struct {
+	Password   string `json:"password,omitempty"`
+	PrivateKey string `json:"privateKey,omitempty"`
+}
+
+type AddKeyAddressMappingRequest struct {
+	KeyName string `json:"keyname,omitempty"`
+	Address string `json:"address,omitempty"`
+}
+
+type CreateWalletResponse struct {
+	KeyName string `json:"keyname,omitempty"`
+	Address string `json:"address"`
 }

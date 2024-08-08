@@ -51,7 +51,7 @@ type Wallet interface {
 	ethsigner.WalletTypedData
 	GetWalletFile(ctx context.Context, addr ethtypes.Address0xHex) (keystorev3.WalletFile, error)
 	AddListener(listener chan<- ethtypes.Address0xHex)
-	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) // Add this method
+	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) // Add this method
 }
 
 func NewFilesystemWallet(ctx context.Context, conf *Config, initialListeners ...chan<- ethtypes.Address0xHex) (ww Wallet, err error) {
@@ -419,41 +419,41 @@ func coalesce(primary, fallback string) string {
 	return fallback
 }
 
-func (w *fsWallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) {
+func (w *fsWallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
 	var keypair *secp256k1.KeyPair
 	var err error
 
 	if privateKeyHex == "" {
 		keypair, err = secp256k1.GenerateSecp256k1KeyPair()
 		if err != nil {
-			return ethtypes.Address0xHex{}, err
+			return ethsigner.CreateWalletResponse{}, err
 		}
 	} else {
 		privateKey, err := hex.DecodeString(strings.TrimPrefix(privateKeyHex, "0x"))
 		if err != nil {
-			return ethtypes.Address0xHex{}, err
+			return ethsigner.CreateWalletResponse{}, err
 		}
 		keypair, err = secp256k1.NewSecp256k1KeyPair(privateKey)
 		if err != nil {
-			return ethtypes.Address0xHex{}, err
+			return ethsigner.CreateWalletResponse{}, err
 		}
 	}
 
 	var passwordToUse string
 	var passwordFilePath string
 	if password == "" {
-		passwordBytes, err := os.ReadFile(coalesce(w.conf.DefaultPasswordFile, "/data/password"))
+		passwordBytes, err := os.ReadFile(coalesce(w.conf.DefaultPasswordFile, "./data/password"))
 		if err != nil {
-			return ethtypes.Address0xHex{}, fmt.Errorf("failed to read password file: %w", err)
+			return ethsigner.CreateWalletResponse{}, fmt.Errorf("failed to read password file: %w", err)
 		}
 		passwordToUse = strings.TrimSpace(string(passwordBytes))
-		passwordFilePath = coalesce(w.conf.DefaultPasswordFile, "/data/password")
+		passwordFilePath = coalesce(w.conf.DefaultPasswordFile, "./data/password")
 	} else {
 		passwordToUse = password
 		passwordFilePath = path.Join(w.conf.Filenames.PasswordPath, fmt.Sprintf("%s.pwd", strings.TrimPrefix(keypair.Address.String(), "0x")))
 		err = os.WriteFile(passwordFilePath, []byte(passwordToUse), 0600)
 		if err != nil {
-			return ethtypes.Address0xHex{}, fmt.Errorf("failed to write password file: %w", err)
+			return ethsigner.CreateWalletResponse{}, fmt.Errorf("failed to write password file: %w", err)
 		}
 	}
 
@@ -463,12 +463,12 @@ func (w *fsWallet) CreateWallet(ctx context.Context, password string, privateKey
 
 	walletFileJSON, err := json.Marshal(walletFile)
 	if err != nil {
-		return ethtypes.Address0xHex{}, err
+		return ethsigner.CreateWalletResponse{}, err
 	}
 
 	err = os.WriteFile(walletFilePath, walletFileJSON, 0600)
 	if err != nil {
-		return ethtypes.Address0xHex{}, err
+		return ethsigner.CreateWalletResponse{}, err
 	}
 
 	metadataFilePath := path.Join(w.conf.Path, fmt.Sprintf("%s.toml", addr))
@@ -485,14 +485,16 @@ password-file = "%s"
 
 	err = os.WriteFile(metadataFilePath, []byte(metadataContent), 0600)
 	if err != nil {
-		return ethtypes.Address0xHex{}, err
+		return ethsigner.CreateWalletResponse{}, err
 	}
 
 	fi, err := os.Stat(walletFilePath)
 	if err != nil {
-		return ethtypes.Address0xHex{}, err
+		return ethsigner.CreateWalletResponse{}, err
 	}
 
 	w.notifyNewFiles(ctx, fi)
-	return keypair.Address, nil
+	return ethsigner.CreateWalletResponse{
+		Address: keypair.Address.String(),
+	}, nil
 }

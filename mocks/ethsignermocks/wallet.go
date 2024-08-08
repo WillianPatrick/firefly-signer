@@ -110,18 +110,18 @@ func (_m *Wallet) Sign(ctx context.Context, txn *ethsigner.Transaction, chainID 
 	return r0, r1
 }
 
-func (_m *Wallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) {
+func (_m *Wallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
 	ret := _m.Called(ctx, password, privateKeyHex)
 
-	var r0 ethtypes.Address0xHex
+	var r0 ethsigner.CreateWalletResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) (ethtypes.Address0xHex, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (ethsigner.CreateWalletResponse, error)); ok {
 		return rf(ctx, password, privateKeyHex)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) ethtypes.Address0xHex); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) ethsigner.CreateWalletResponse); ok {
 		r0 = rf(ctx, password, privateKeyHex)
 	} else {
-		r0 = ret.Get(0).(ethtypes.Address0xHex)
+		r0 = ret.Get(0).(ethsigner.CreateWalletResponse)
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {

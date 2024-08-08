@@ -12,3 +12,4 @@ deps
 firefly.ffsigner
 vendor.zip
 vendor/*
+ffsigner/data/*
