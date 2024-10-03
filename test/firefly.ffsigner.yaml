@@ -18,5 +18,20 @@ azureKeyVault:
     maxSize: 1000
     itemsToPrune: 100
     ttl: 1h    
+awsKMS:
+  enabled: false
+  region: us-east-1 
+  accessKeyID: YOUR_AWS_ACCESS_KEY_ID        
+  secretAccessKey: YOUR_AWS_SECRET_ACCESS_KEY  
+  remoteSign: false
+  mappingKeyAddress:
+    enabled: false
+    refresh:
+      enabled: false
+      interval: 5m  
+  cache:
+    maxSize: 1000
+    itemsToPrune: 100
+    ttl: 1h    
 backend:
   chainId: 0

@@ -46,7 +46,7 @@ import (
 type Wallet interface {
 	ethsigner.WalletTypedData
 	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) // Add this method
-	AddMappingKeyAddress(key string, address string) error
+
 }
 
 func (w *azWallet) Initialize(ctx context.Context) error {
@@ -288,7 +288,7 @@ func (w *azWallet) storeKeyPairInAzureKeyVault(ctx context.Context, keypair *sec
 
 func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
 
-	unsignedTxnJson, err := json.Marshal(txn)
+	unsignedTxnJSON, err := json.Marshal(txn)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +298,7 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 		return nil, err
 	}
 	key := from.String()
-	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Unsigned transaction tnx: %s", chainID, key, string(unsignedTxnJson))
+	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Unsigned transaction tnx: %s", chainID, key, string(unsignedTxnJSON))
 
 	signer := types.NewEIP155Signer(big.NewInt(chainID))
 	tx := types.NewTx(&types.LegacyTx{
@@ -310,9 +310,9 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 		Data:     txn.Data,
 	})
 
-	unsignedTxJson, err := json.Marshal(tx)
-	if err != nil {
-		return nil, err
+	unsignedTxJSON, _err := json.Marshal(tx)
+	if _err != nil {
+		return nil, _err
 	}
 
 	hash := signer.Hash(tx)
@@ -321,7 +321,12 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 		Value:     hash[:],
 	}
 
-	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Send RPC Transaction With Signature: %s", chainID, key, hex.EncodeToString(unsignedTxJson))
+	log.L(ctx).Debugf(
+		"AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Send RPC Transaction With Signature: %s",
+		chainID,
+		key,
+		hex.EncodeToString(unsignedTxJSON),
+	)
 
 	keyname := strings.TrimPrefix(key, "0x")
 
@@ -369,12 +374,12 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 		return nil, err
 	}
 
-	signedTxJson, err := json.Marshal(signedTx)
+	signedTxJSON, err := json.Marshal(signedTx)
 	if err != nil {
 		return nil, err
 	}
 
-	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Send RPC Transaction With Signature: %s", chainID, key, hex.EncodeToString(signedTxJson))
+	log.L(ctx).Debugf("AzureKeyVault - Remote Sign - Chain ID: %d - From: %s, Send RPC Transaction With Signature: %s", chainID, key, hex.EncodeToString(signedTxJSON))
 
 	return signedTxBytes, nil
 
@@ -490,7 +495,7 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 	address := common.BytesToAddress(hash[12:])
 
 	if ethtypes.Address0xHex(address) != ethtypes.Address0xHex(crypto.PubkeyToAddress(*publicKeyECDSA).Bytes()) {
-		return ethtypes.Address0xHex{}, errors.New("Fail generate public key")
+		return ethtypes.Address0xHex{}, errors.New("fail generate public key")
 	}
 
 	if w.conf.MappingKeyAddress.Enabled {
@@ -523,7 +528,7 @@ func (w *azWallet) refreshAddressToKeyNameMapping(ctx context.Context) error {
 			if keyItem.Tags != nil {
 				keyName := extractKeyNameFromKID(keyItem.KID)
 				if keyName != "" {
-					if _, exists := w.addressToKeyName[(common.Address)(common.HexToAddress("0x"+keyName))]; !exists {
+					if _, exists := w.addressToKeyName[common.HexToAddress("0x"+keyName)]; !exists {
 						if addr, ok := keyItem.Tags["EthereumAddress"]; ok {
 							ca := common.HexToAddress(*addr)
 							if _, exists := w.addressToKeyName[ca]; !exists {

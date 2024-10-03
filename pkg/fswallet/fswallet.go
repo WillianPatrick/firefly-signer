@@ -51,7 +51,7 @@ type Wallet interface {
 	ethsigner.WalletTypedData
 	GetWalletFile(ctx context.Context, addr ethtypes.Address0xHex) (keystorev3.WalletFile, error)
 	AddListener(listener chan<- ethtypes.Address0xHex)
-	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) // Add this method
+	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error)
 }
 
 func NewFilesystemWallet(ctx context.Context, conf *Config, initialListeners ...chan<- ethtypes.Address0xHex) (ww Wallet, err error) {
@@ -109,6 +109,10 @@ type fsWallet struct {
 	fsListenerCancel  context.CancelFunc
 	fsListenerStarted chan error
 	fsListenerDone    chan struct{}
+}
+
+func (w *fsWallet) AddMappingKeyAddress(key string, address string) error {
+	return nil
 }
 
 func (w *fsWallet) Sign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {

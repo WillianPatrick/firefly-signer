@@ -33,6 +33,7 @@ import (
 	"github.com/hyperledger/firefly-signer/internal/rpcserver"
 	"github.com/hyperledger/firefly-signer/internal/signerconfig"
 	"github.com/hyperledger/firefly-signer/internal/signermsgs"
+	"github.com/hyperledger/firefly-signer/pkg/awskms"
 	"github.com/hyperledger/firefly-signer/pkg/azurekeyvault"
 	"github.com/hyperledger/firefly-signer/pkg/ethsigner"
 	"github.com/hyperledger/firefly-signer/pkg/fswallet"
@@ -92,33 +93,59 @@ func run() error {
 	}()
 
 	var wallet ethsigner.Wallet
-	var aZwallet azurekeyvault.Wallet
 
+	// Initialize the appropriate wallet based on configuration
 	switch {
 	case config.GetBool(signerconfig.KeyVaultEnabled):
-		aZwallet, err = azurekeyvault.NewAzureKeyVaultWallet(ctx, azurekeyvault.ReadConfig(signerconfig.KeyVaultConfig))
+		// Azure Key Vault is enabled
+		azWallet, err := azurekeyvault.NewAzureKeyVaultWallet(ctx, azurekeyvault.ReadConfig(signerconfig.KeyVaultConfig))
 		if err != nil {
 			return err
 		}
-		wallet = aZwallet
+		wallet = azWallet
 
+		// Handle mapping and refresh endpoints if enabled
 		if config.GetBool(signerconfig.KeyVaultMappingKeysEnabled) {
-			router.HandleFunc("/wallets/mapping", addMappingKeyAddressHandler(aZwallet)).Methods("POST")
+			router.HandleFunc("/wallets/mapping", addMappingKeyAddressHandler(wallet)).Methods("POST")
 			if config.GetBool(signerconfig.KeyVaultMappingKeysRefreshEnabled) {
 				router.HandleFunc("/wallets/refresh", refreshWalletHandler(wallet)).Methods("POST")
 			}
 		}
 
+	case config.GetBool(signerconfig.AWSKMSEnabled):
+		// AWS KMS is enabled
+		awsWallet, err := awskms.NewAWSKMSWallet(ctx, awskms.ReadConfig(signerconfig.AWSKMSConfig))
+		if err != nil {
+			return err
+		}
+		wallet = awsWallet
+
+		// Handle mapping and refresh endpoints if enabled
+		if config.GetBool(signerconfig.AWSKMSMappingKeysEnabled) {
+			router.HandleFunc("/wallets/mapping", addMappingKeyAddressHandler(wallet)).Methods("POST")
+			if config.GetBool(signerconfig.AWSKMSMappingKeysRefreshEnabled) {
+				router.HandleFunc("/wallets/refresh", refreshWalletHandler(wallet)).Methods("POST")
+			}
+		}
+
 	case config.GetBool(signerconfig.FileWalletEnabled):
+		// File wallet is enabled
 		fileWallet, err := fswallet.NewFilesystemWallet(ctx, fswallet.ReadConfig(signerconfig.FileWalletConfig))
 		if err != nil {
 			return err
 		}
 		wallet = fileWallet
+
 	default:
 		return i18n.NewError(ctx, signermsgs.MsgNoWalletEnabled)
 	}
 
+	// Initialize the wallet (e.g., start any background tasks)
+	if err := wallet.Initialize(ctx); err != nil {
+		return err
+	}
+
+	// Set up handlers
 	router.HandleFunc("/wallets/create", createWalletHandler(wallet)).Methods("POST")
 
 	server, err := rpcserver.NewServer(ctx, wallet)
@@ -173,11 +200,10 @@ func refreshWalletHandler(wallet ethsigner.Wallet) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Wallet mapping refreshed successfully"))
 	}
 }
 
-func addMappingKeyAddressHandler(wallet azurekeyvault.Wallet) http.HandlerFunc {
+func addMappingKeyAddressHandler(wallet ethsigner.Wallet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req ethsigner.AddKeyAddressMappingRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -190,7 +216,6 @@ func addMappingKeyAddressHandler(wallet azurekeyvault.Wallet) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Key Address added mapping successfully"))
 	}
 }
 

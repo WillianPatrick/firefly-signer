@@ -44,5 +44,6 @@
     "Warnf",
     "wsclient"
   ],
-  "go.testTimeout": "10s"
+  "go.testTimeout": "10s",
+  "DockerRun.DisableDockerrc": true
 }

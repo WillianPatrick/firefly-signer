@@ -1,3 +1,19 @@
+// Copyright © 2024 Willian Patrick dos Santos
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package hashicorpvault
 
 import (
@@ -12,7 +28,6 @@ import (
 	"errors"
 	"math/big"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -27,6 +42,8 @@ import (
 	"github.com/karlseguin/ccache"
 )
 
+const keyPath = "/keys/"
+
 type Wallet interface {
 	ethsigner.WalletTypedData
 	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error)
@@ -39,7 +56,6 @@ type vaultWallet struct {
 	conf             Config
 	signerCache      *ccache.Cache
 	signerCacheTTL   time.Duration
-	mux              sync.Mutex
 	vaultClient      *vault.Client
 	stopRefresh      chan struct{}
 	addressToKeyName map[common.Address]string
@@ -120,7 +136,7 @@ func (w *vaultWallet) LocalSign(ctx context.Context, txn *ethsigner.Transaction,
 			return nil, err
 		}
 		if secret == nil || secret.Data == nil {
-			return nil, errors.New("Chave privada não encontrada no Vault")
+			return nil, errors.New("chave privada não encontrada no Vault")
 		}
 		privateKey = secret.Data["privateKey"].(string)
 		w.signerCache.Set(key, privateKey, w.signerCacheTTL)
@@ -147,7 +163,7 @@ func (w *vaultWallet) LocalSign(ctx context.Context, txn *ethsigner.Transaction,
 }
 
 func (w *vaultWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
-	unsignedTxnJson, err := json.Marshal(txn)
+	unsignedTxnJSON, err := json.Marshal(txn)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +173,7 @@ func (w *vaultWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction
 		return nil, err
 	}
 	key := from.String()
-	log.L(ctx).Debugf("Vault - Remote Sign - Chain ID: %d - From: %s, Unsigned transaction txn: %s", chainID, key, string(unsignedTxnJson))
+	log.L(ctx).Debugf("Vault - Remote Sign - Chain ID: %d - From: %s, Unsigned transaction txn: %s", chainID, key, string(unsignedTxnJSON))
 
 	signer := types.NewEIP155Signer(big.NewInt(chainID))
 	tx := types.NewTx(&types.LegacyTx{
@@ -190,7 +206,7 @@ func (w *vaultWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction
 	}
 
 	if secret == nil || secret.Data == nil {
-		return nil, errors.New("Falha ao obter a assinatura do Vault")
+		return nil, errors.New("falha ao obter a assinatura do Vault")
 	}
 
 	signatureHex := secret.Data["signature"].(string)
@@ -219,7 +235,7 @@ func (w *vaultWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction
 	copy(rPadded[32-len(rBytes):], rBytes)
 	copy(sPadded[32-len(sBytes):], sBytes)
 
-	signature := append(rPadded, sPadded...)
+	var signature = append(rPadded, sPadded...)
 
 	// Recuperar o ID de recuperação (v)
 	publicKey, err := w.getPublicKeyForKeyName(keyName)
@@ -230,7 +246,7 @@ func (w *vaultWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction
 	recID := -1
 	for i := 0; i < 2; i++ {
 		v := byte(i + 27)
-		sig := append(signature, v)
+		var sig = append(signature, v)
 		pubKeyRecovered, err := crypto.SigToPub(hash[:], sig)
 		if err == nil && pubKeyRecovered != nil {
 			pubKeyBytes := crypto.FromECDSAPub(pubKeyRecovered)
@@ -243,12 +259,12 @@ func (w *vaultWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction
 	}
 
 	if recID == -1 {
-		return nil, errors.New("Falha ao recuperar a chave pública")
+		return nil, errors.New("falha ao recuperar a chave pública")
 	}
 
 	v := byte(recID + 27 + int(chainID)*2)
 
-	sig := append(signature, v)
+	var sig = append(signature, v)
 
 	signedTx, err := tx.WithSignature(signer, sig)
 	if err != nil {
@@ -276,18 +292,18 @@ func (w *vaultWallet) getKeyNameForAddress(address ethtypes.Address0xHex) (strin
 	if keyName, exists := w.addressToKeyName[common.Address(address)]; exists {
 		return keyName, nil
 	}
-	return "", errors.New("Key Name não encontrado para o endereço")
+	return "", errors.New("key Name não encontrado para o endereço")
 }
 
 func (w *vaultWallet) getPublicKeyForKeyName(keyName string) (*ecdsa.PublicKey, error) {
-	readPath := w.conf.TransitPath + "/keys/" + keyName
+	readPath := w.conf.TransitPath + keyPath + keyName
 
 	secret, err := w.vaultClient.Logical().Read(readPath)
 	if err != nil {
 		return nil, err
 	}
 	if secret == nil || secret.Data == nil {
-		return nil, errors.New("Falha ao obter a chave pública do Vault")
+		return nil, errors.New("falha ao obter a chave pública do Vault")
 	}
 
 	keysData := secret.Data["keys"].(map[string]interface{})
@@ -303,7 +319,7 @@ func (w *vaultWallet) getPublicKeyForKeyName(keyName string) (*ecdsa.PublicKey, 
 	}
 	pubKey, ok := pubKeyInterface.(*ecdsa.PublicKey)
 	if !ok {
-		return nil, errors.New("A chave pública não é ECDSA")
+		return nil, errors.New("a chave pública não é ECDSA")
 	}
 	return pubKey, nil
 }
@@ -391,7 +407,7 @@ func (w *vaultWallet) CreateKey(ctx context.Context, privateKeyHex string) (eths
 
 	keyName := generateRandomKeyName()
 
-	createPath := w.conf.TransitPath + "/keys/" + keyName
+	createPath := w.conf.TransitPath + keyPath + keyName
 	data := map[string]interface{}{
 		"type": "ecdsa-p256k1",
 	}
@@ -445,7 +461,7 @@ func (w *vaultWallet) ImportKey(ctx context.Context, privateKeyHex string) (etht
 
 	keyName := strings.TrimPrefix(address.Hex(), "0x")
 
-	importPath := w.conf.TransitPath + "/keys/" + keyName
+	importPath := w.conf.TransitPath + keyPath + keyName
 	data := map[string]interface{}{
 		"type":                   "ecdsa-p256k1",
 		"allow_plaintext_backup": true,
@@ -468,7 +484,7 @@ func (w *vaultWallet) ImportKey(ctx context.Context, privateKeyHex string) (etht
 
 func (w *vaultWallet) AddMappingKeyAddress(key string, address string) error {
 	if !w.conf.MappingKeyAddress.Enabled {
-		return errors.New("Recurso de mapeamento não habilitado")
+		return errors.New("recurso de mapeamento não habilitado")
 	}
 	w.addressToKeyName[common.HexToAddress(address)] = key
 	return nil
@@ -500,7 +516,7 @@ func (w *vaultWallet) startRefreshLoop(ctx context.Context) {
 			select {
 			case <-ticker.C:
 				if err := w.refreshAddressToKeyNameMapping(ctx); err != nil {
-					log.L(ctx).Errorf("Falha ao atualizar o mapeamento address-to-keyName: %v", err)
+					log.L(ctx).Errorf("falha ao atualizar o mapeamento address-to-keyName: %v", err)
 				}
 			case <-w.stopRefresh:
 				return
@@ -511,7 +527,7 @@ func (w *vaultWallet) startRefreshLoop(ctx context.Context) {
 
 func (w *vaultWallet) SignTypedDataV4(ctx context.Context, from ethtypes.Address0xHex, payload *eip712.TypedData) (*ethsigner.EIP712Result, error) {
 	// Implementar se necessário
-	return nil, errors.New("SignTypedDataV4 não implementado")
+	return nil, errors.New("signTypedDataV4 não implementado")
 }
 
 func (w *vaultWallet) GetAccounts(ctx context.Context) ([]*ethtypes.Address0xHex, error) {
@@ -531,7 +547,7 @@ func (w *vaultWallet) Refresh(ctx context.Context) error {
 }
 
 func (w *vaultWallet) refreshAddressToKeyNameMapping(ctx context.Context) error {
-	log.L(ctx).Debugf("Atualizando mapeamento de endereços...")
+	log.L(ctx).Debugf("atualizando mapeamento de endereços...")
 
 	listPath := w.conf.TransitPath + "/keys?list=true"
 	secret, err := w.vaultClient.Logical().List(listPath)
@@ -540,7 +556,7 @@ func (w *vaultWallet) refreshAddressToKeyNameMapping(ctx context.Context) error 
 	}
 
 	if secret == nil || secret.Data == nil {
-		return errors.New("Falha ao listar chaves do Vault")
+		return errors.New("falha ao listar chaves do Vault")
 	}
 
 	keys := secret.Data["keys"].([]interface{})
@@ -554,7 +570,7 @@ func (w *vaultWallet) refreshAddressToKeyNameMapping(ctx context.Context) error 
 		w.addressToKeyName[address] = keyName
 	}
 
-	log.L(ctx).Debugf("Atualizado: %d endereços mapeados", len(w.addressToKeyName))
+	log.L(ctx).Debugf("atualizado: %d endereços mapeados", len(w.addressToKeyName))
 
 	return nil
 }

@@ -84,7 +84,7 @@ func TestRunFailStartup(t *testing.T) {
 	defer rootCmd.SetArgs([]string{})
 
 	err := Execute()
-	assert.Regexp(t, "FF00151", err)
+	assert.Regexp(t, "FF22013", err)
 
 }
 

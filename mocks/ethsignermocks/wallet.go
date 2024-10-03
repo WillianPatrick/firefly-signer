@@ -30,6 +30,11 @@ func (_m *Wallet) Close() error {
 	return r0
 }
 
+// AddMappingKeyAddress implements Wallet.
+func (m *Wallet) AddMappingKeyAddress(key string, address string) error {
+	return nil
+}
+
 // GetAccounts provides a mock function with given fields: ctx
 func (_m *Wallet) GetAccounts(ctx context.Context) ([]*ethtypes.Address0xHex, error) {
 	ret := _m.Called(ctx)
@@ -146,3 +151,4 @@ func NewWallet(t interface {
 
 	return mock
 }
+

@@ -1,4 +1,4 @@
-// Copyright © 2024 Kaleido, Inc.
+// Copyright © 2024 Willian Patrick dos Santos
 //
 // SPDX-License-Identifier: Apache-2.0
 //
