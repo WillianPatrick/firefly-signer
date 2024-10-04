@@ -152,50 +152,43 @@ func (w *kmsWallet) LocalSign(ctx context.Context, txn *ethsigner.Transaction, c
 	key := from.String()
 	log.L(ctx).Debugf("AWSKMS - Local Sign - Chain ID: %d - From: %s, Unsigned transaction txn: %s", chainID, key, string(unsignedTxnJSON))
 
-	privateKey, err := w.getLocalPrivateKey(ctx, from)
+	var privateKey string
+	item := w.signerCache.Get(key)
+	if item != nil && !item.Expired() {
+		item.Extend(w.signerCacheTTL)
+		w.mux.Lock()
+		privateKey = item.Value().(string)
+		w.mux.Unlock()
+	} else {
+		privateKey, err := w.getLocalPrivateKey(ctx, from)
+		if err != nil {
+			return nil, err
+		}
+		w.signerCache.Set(key, privateKey, w.signerCacheTTL)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("AWS KMS: failed to retrieve local private key: %w", err)
 	}
 
-	signer := types.NewEIP155Signer(big.NewInt(chainID))
-	tx := types.NewTx(&types.LegacyTx{
-		Nonce:    txn.Nonce.Uint64(),
-		To:       (*common.Address)(txn.To),
-		Value:    txn.Value.BigInt(),
-		Gas:      txn.GasLimit.Uint64(),
-		GasPrice: txn.GasPrice.BigInt(),
-		Data:     txn.Data,
-	})
-
-	hash := signer.Hash(tx)
-
-	signature, err := crypto.Sign(hash[:], privateKey)
+	privateKeyBytes, err := hex.DecodeString(privateKey)
 	if err != nil {
-		return nil, fmt.Errorf("AWS KMS: failed to sign transaction locally: %w", err)
+		return nil, err
 	}
 
-	recID := int(signature[64]) - 27
-	if recID != 0 && recID != 1 {
-		return nil, errors.New("AWS KMS: invalid recovery ID")
-	}
-
-	v := byte(recID + 27 + int(chainID)*2 + 8)
-
-	sig := make([]byte, 65)
-	copy(sig, signature[:64])
-	sig[64] = v
-
-	signedTx, err := tx.WithSignature(signer, sig)
+	keypair, err := secp256k1.NewSecp256k1KeyPair(privateKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("AWS KMS: failed to apply local signature to transaction: %w", err)
+		return nil, err
 	}
 
-	signedTxBytes, err := signedTx.MarshalBinary()
+	signedTx, err := txn.Sign(keypair, chainID)
 	if err != nil {
-		return nil, fmt.Errorf("AWS KMS: failed to marshal signed transaction: %w", err)
+		return nil, err
 	}
 
-	return signedTxBytes, nil
+	log.L(ctx).Debugf("AWS KMS - Local Sign - Chain ID: %d - From: %s, Signed transaction: %s", chainID, key, hex.EncodeToString(signedTx))
+
+	return signedTx, nil
 }
 
 func (w *kmsWallet) getLocalPrivateKey(ctx context.Context, address ethtypes.Address0xHex) (*ecdsa.PrivateKey, error) {
@@ -583,7 +576,26 @@ func (w *kmsWallet) startRefreshLoop(ctx context.Context) {
 }
 
 func (w *kmsWallet) SignTypedDataV4(ctx context.Context, from ethtypes.Address0xHex, payload *eip712.TypedData) (*ethsigner.EIP712Result, error) {
-	return nil, errors.New("SignTypedDataV4 not implemented")
+	key := from.String()
+	item := w.signerCache.Get(key)
+	var privateKey string
+
+	if item != nil && !item.Expired() {
+		privateKey = item.Value().(string)
+	} else {
+		privateKey, err := w.getLocalPrivateKey(ctx, from)
+		if err != nil {
+			return nil, err
+		}
+		w.signerCache.Set(key, privateKey, w.signerCacheTTL)
+	}
+
+	keypair, err := secp256k1.NewSecp256k1KeyPair([]byte(privateKey))
+	if err != nil {
+		return nil, err
+	}
+
+	return ethsigner.SignTypedDataV4(ctx, keypair, payload)
 }
 
 func (w *kmsWallet) GetAccounts(ctx context.Context) ([]*ethtypes.Address0xHex, error) {
