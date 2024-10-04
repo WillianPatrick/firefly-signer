@@ -151,4 +151,3 @@ func NewWallet(t interface {
 
 	return mock
 }
-
