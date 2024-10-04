@@ -1,4 +1,4 @@
-// Copyright © 2024 Kaleido, Inc.
+// Copyright © 2024 Willian Patrick dos Santos - superhitec@gmail.com
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -237,10 +237,10 @@ func (w *azWallet) Close() error {
 }
 func (w *azWallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
 	if !w.conf.RemoteSign {
-		r, _ := w.CreateSecret(ctx, password, privateKeyHex)
+		r, err := w.CreateSecret(ctx, password, privateKeyHex)
 		return ethsigner.CreateWalletResponse{
 			Address: r.String(),
-		}, nil
+		}, err
 
 	}
 
@@ -387,11 +387,11 @@ func (w *azWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, c
 
 func (w *azWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
 	if privateKeyHex != "" {
-		addr, _ := w.ImportKey(ctx, privateKeyHex)
+		addr, err := w.ImportKey(ctx, privateKeyHex)
 		return ethsigner.CreateWalletResponse{
 			Address: strings.TrimPrefix(addr.String(), "0x"),
 			KeyName: addr.String(),
-		}, nil
+		}, err
 	}
 
 	keyParams := azkeys.CreateKeyParameters{

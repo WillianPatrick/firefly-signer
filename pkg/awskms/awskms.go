@@ -35,6 +35,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	secretsmanagertypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -43,6 +45,8 @@ import (
 	"github.com/hyperledger/firefly-signer/pkg/eip712"
 	"github.com/hyperledger/firefly-signer/pkg/ethsigner"
 	"github.com/hyperledger/firefly-signer/pkg/ethtypes"
+	"github.com/hyperledger/firefly-signer/pkg/secp256k1"
+	"github.com/karlseguin/ccache"
 )
 
 type algorithmIdentifier struct {
@@ -55,7 +59,6 @@ type subjectPublicKeyInfo struct {
 	SubjectPublicKey asn1.BitString
 }
 
-// Wallet interface defines the methods required for a wallet implementation.
 type Wallet interface {
 	ethsigner.WalletTypedData
 	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error)
@@ -64,16 +67,17 @@ type Wallet interface {
 	Close() error
 }
 
-// kmsWallet implements the Wallet interface using AWS KMS.
 type kmsWallet struct {
 	conf             Config
 	kmsClient        *kms.Client
+	secretsClient    *secretsmanager.Client
 	stopRefresh      chan struct{}
 	addressToKeyName map[common.Address]string
+	signerCache      *ccache.Cache
+	signerCacheTTL   time.Duration
 	mux              sync.Mutex
 }
 
-// NewAWSKMSWallet initializes a new AWS KMS wallet.
 func NewAWSKMSWallet(ctx context.Context, conf *Config) (Wallet, error) {
 	w := &kmsWallet{
 		conf: *conf,
@@ -82,7 +86,6 @@ func NewAWSKMSWallet(ctx context.Context, conf *Config) (Wallet, error) {
 	var awsCfg aws.Config
 	var err error
 
-	// Use provided AWS credentials if available, otherwise use default credentials.
 	if conf.AccessKeyID != "" && conf.SecretAccessKey != "" {
 		log.L(ctx).Debugf("AWS KMS: Using static credentials.")
 		creds := credentials.NewStaticCredentialsProvider(conf.AccessKeyID, conf.SecretAccessKey, "")
@@ -99,7 +102,6 @@ func NewAWSKMSWallet(ctx context.Context, conf *Config) (Wallet, error) {
 		return nil, fmt.Errorf("AWS KMS: failed to load AWS configuration: %w", err)
 	}
 
-	// Verificar as credenciais usando STS
 	stsClient := sts.NewFromConfig(awsCfg)
 	callerIdentity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
@@ -108,12 +110,21 @@ func NewAWSKMSWallet(ctx context.Context, conf *Config) (Wallet, error) {
 	log.L(ctx).Debugf("AWS KMS: Successfully authenticated as %s", *callerIdentity.Arn)
 
 	w.kmsClient = kms.NewFromConfig(awsCfg)
+
+	if !w.conf.RemoteSign {
+		w.secretsClient = secretsmanager.NewFromConfig(awsCfg)
+	}
+
 	w.addressToKeyName = make(map[common.Address]string)
+
+	maxSize := conf.LocalSign.Cache.MaxSize | int64(100)
+	itemsToPrune := conf.LocalSign.Cache.ItemsToPrune | uint32(10)
+
+	w.signerCache = ccache.New(ccache.Configure().MaxSize(maxSize).ItemsToPrune(itemsToPrune))
 
 	return w, nil
 }
 
-// Initialize sets up any necessary initialization for the wallet.
 func (w *kmsWallet) Initialize(ctx context.Context) error {
 	if w.conf.MappingKeyAddress.Enabled && w.conf.MappingKeyAddress.Refresh.Enabled {
 		w.startRefreshLoop(ctx)
@@ -121,12 +132,114 @@ func (w *kmsWallet) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// Sign handles signing of transactions, delegating to remote signing.
 func (w *kmsWallet) Sign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
+	if !w.conf.RemoteSign {
+		return w.LocalSign(ctx, txn, chainID)
+	}
 	return w.RemoteSign(ctx, txn, chainID)
 }
 
-// RemoteSign signs the transaction using AWS KMS.
+func (w *kmsWallet) LocalSign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
+	unsignedTxnJSON, err := json.Marshal(txn)
+	if err != nil {
+		return nil, err
+	}
+
+	var from ethtypes.Address0xHex
+	if err := json.Unmarshal(txn.From, &from); err != nil {
+		return nil, err
+	}
+	key := from.String()
+	log.L(ctx).Debugf("AWSKMS - Local Sign - Chain ID: %d - From: %s, Unsigned transaction txn: %s", chainID, key, string(unsignedTxnJSON))
+
+	privateKey, err := w.getLocalPrivateKey(ctx, from)
+	if err != nil {
+		return nil, fmt.Errorf("AWS KMS: failed to retrieve local private key: %w", err)
+	}
+
+	signer := types.NewEIP155Signer(big.NewInt(chainID))
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    txn.Nonce.Uint64(),
+		To:       (*common.Address)(txn.To),
+		Value:    txn.Value.BigInt(),
+		Gas:      txn.GasLimit.Uint64(),
+		GasPrice: txn.GasPrice.BigInt(),
+		Data:     txn.Data,
+	})
+
+	hash := signer.Hash(tx)
+
+	signature, err := crypto.Sign(hash[:], privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("AWS KMS: failed to sign transaction locally: %w", err)
+	}
+
+	recID := int(signature[64]) - 27
+	if recID != 0 && recID != 1 {
+		return nil, errors.New("AWS KMS: invalid recovery ID")
+	}
+
+	v := byte(recID + 27 + int(chainID)*2 + 8)
+
+	sig := make([]byte, 65)
+	copy(sig, signature[:64])
+	sig[64] = v
+
+	signedTx, err := tx.WithSignature(signer, sig)
+	if err != nil {
+		return nil, fmt.Errorf("AWS KMS: failed to apply local signature to transaction: %w", err)
+	}
+
+	signedTxBytes, err := signedTx.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("AWS KMS: failed to marshal signed transaction: %w", err)
+	}
+
+	return signedTxBytes, nil
+}
+
+func (w *kmsWallet) getLocalPrivateKey(ctx context.Context, address ethtypes.Address0xHex) (*ecdsa.PrivateKey, error) {
+	addr := common.Address(address).Hex()
+	item := w.signerCache.Get(addr)
+	if item != nil && !item.Expired() {
+		privateKeyHex := item.Value().(string)
+		privateKeyBytes, err := hex.DecodeString(privateKeyHex)
+		if err != nil {
+			return nil, fmt.Errorf("AWS KMS: failed to decode cached private key hex: %w", err)
+		}
+		privateKey, err := crypto.ToECDSA(privateKeyBytes)
+		if err != nil {
+			return nil, fmt.Errorf("AWS KMS: failed to parse cached ECDSA private key: %w", err)
+		}
+		return privateKey, nil
+	}
+
+	secretName := addr
+	getSecretInput := &secretsmanager.GetSecretValueInput{
+		SecretId: aws.String(secretName),
+	}
+
+	secretValue, err := w.secretsClient.GetSecretValue(ctx, getSecretInput)
+	if err != nil {
+		return nil, fmt.Errorf("AWS KMS: failed to retrieve secret '%s': %w", secretName, err)
+	}
+
+	privateKeyHex := *secretValue.SecretString
+	privateKeyBytes, err := hex.DecodeString(strings.TrimPrefix(privateKeyHex, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("AWS KMS: failed to decode private key hex: %w", err)
+	}
+
+	privateKey, err := crypto.ToECDSA(privateKeyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("AWS KMS: failed to parse ECDSA private key: %w", err)
+	}
+
+	w.signerCache.Set(addr, strings.TrimPrefix(privateKeyHex, "0x"), w.conf.LocalSign.Cache.TTL)
+
+	return privateKey, nil
+}
+
 func (w *kmsWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
 	unsignedTxnJSON, err := json.Marshal(txn)
 	if err != nil {
@@ -161,7 +274,7 @@ func (w *kmsWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, 
 		KeyId:            aws.String(keyName),
 		Message:          hash[:],
 		MessageType:      kmstypes.MessageTypeDigest,
-		SigningAlgorithm: kmstypes.SigningAlgorithmSpecEcdsaSha256, // Verifique se este é o algoritmo correto para secp256k1
+		SigningAlgorithm: kmstypes.SigningAlgorithmSpecEcdsaSha256,
 	}
 
 	signOutput, err := w.kmsClient.Sign(ctx, signInput)
@@ -176,7 +289,6 @@ func (w *kmsWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, 
 		return nil, err
 	}
 
-	// Ensure 's' is in the lower half of the curve order
 	curveOrder := crypto.S256().Params().N
 	halfOrder := new(big.Int).Rsh(curveOrder, 1)
 
@@ -191,12 +303,10 @@ func (w *kmsWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, 
 	copy(rPadded[32-len(rBytes):], rBytes)
 	copy(sPadded[32-len(sBytes):], sBytes)
 
-	// Combine rPadded and sPadded into a single signature slice.
 	signature := make([]byte, 64)
 	copy(signature, rPadded)
 	copy(signature[32:], sPadded)
 
-	// Recover the recovery ID (v)
 	publicKey, err := w.getPublicKeyForKeyName(ctx, keyName)
 	if err != nil {
 		return nil, err
@@ -225,7 +335,6 @@ func (w *kmsWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, 
 
 	v := byte(recID + 27 + int(chainID)*2 + 8)
 
-	// Combine signature and v into sig slice.
 	sig := make([]byte, 65)
 	copy(sig, signature)
 	sig[64] = v
@@ -243,7 +352,6 @@ func (w *kmsWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, 
 	return signedTxBytes, nil
 }
 
-// parseDERSignature parses a DER-encoded ECDSA signature.
 func parseDERSignature(der []byte) (r, s *big.Int, err error) {
 	var sig struct {
 		R, S *big.Int
@@ -262,26 +370,22 @@ func parsePublicKeyDER(pubKeyDER []byte) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("failed to unmarshal SubjectPublicKeyInfo: %w", err)
 	}
 
-	// Verificar se o algoritmo é id-ecPublicKey (1.2.840.10045.2.1)
-	expectedOID := asn1.ObjectIdentifier{1, 2, 840, 10045, 2, 1} // id-ecPublicKey
+	expectedOID := asn1.ObjectIdentifier{1, 2, 840, 10045, 2, 1}
 	if !spki.Algorithm.Algorithm.Equal(expectedOID) {
 		return nil, errors.New("unexpected public key algorithm")
 	}
 
-	// Unmarshal Parameters para obter o OID da curva
 	var curveOID asn1.ObjectIdentifier
 	_, err = asn1.Unmarshal(spki.Algorithm.Parameters.FullBytes, &curveOID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal curve OID: %w", err)
 	}
 
-	// Verificar se a curva é secp256k1 (1.3.132.0.10)
 	secp256k1OID := asn1.ObjectIdentifier{1, 3, 132, 0, 10}
 	if !curveOID.Equal(secp256k1OID) {
 		return nil, errors.New("unexpected public key curve")
 	}
 
-	// A chave pública está no formato uncompressed: 0x04 || X (32 bytes) || Y (32 bytes)
 	pubKeyBytes := spki.SubjectPublicKey.Bytes
 	if len(pubKeyBytes) != 65 {
 		return nil, errors.New("invalid public key length")
@@ -302,7 +406,6 @@ func parsePublicKeyDER(pubKeyDER []byte) (*ecdsa.PublicKey, error) {
 	return pubKey, nil
 }
 
-// getKeyNameForAddress retrieves the KeyId associated with the given Ethereum address.
 func (w *kmsWallet) getKeyNameForAddress(_ context.Context, address ethtypes.Address0xHex) (string, error) {
 	w.mux.Lock()
 	defer w.mux.Unlock()
@@ -312,7 +415,6 @@ func (w *kmsWallet) getKeyNameForAddress(_ context.Context, address ethtypes.Add
 	return "", errors.New("key name not found for the address")
 }
 
-// getPublicKeyForKeyName retrieves the public key associated with the given KeyId.
 func (w *kmsWallet) getPublicKeyForKeyName(ctx context.Context, keyName string) (*ecdsa.PublicKey, error) {
 	input := &kms.GetPublicKeyInput{
 		KeyId: aws.String(keyName),
@@ -333,35 +435,81 @@ func (w *kmsWallet) getPublicKeyForKeyName(ctx context.Context, keyName string) 
 	return pubKey, nil
 }
 
-// CreateWallet creates a new wallet, optionally importing a provided private key.
 func (w *kmsWallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
-	return w.CreateKey(ctx, privateKeyHex)
-}
-
-// CreateKey creates a new key in AWS KMS or imports an existing private key.
-func (w *kmsWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
-	if privateKeyHex != "" {
-		address, keyName, err := w.ImportKey(ctx, privateKeyHex)
-		if err != nil {
-			return ethsigner.CreateWalletResponse{}, err
-		}
+	if !w.conf.RemoteSign {
+		r, err := w.CreateSecret(ctx, password, privateKeyHex)
 		return ethsigner.CreateWalletResponse{
-			Address: strings.TrimPrefix(address.String(), "0x"),
-			KeyName: keyName,
-		}, nil
+			Address: r.String(),
+		}, err
+
 	}
 
-	// Create an asymmetric key in KMS
+	return w.CreateKey(ctx, privateKeyHex)
+
+}
+
+func (w *kmsWallet) CreateSecret(ctx context.Context, password string, privateKeyHex string) (ethtypes.Address0xHex, error) {
+	var keypair *secp256k1.KeyPair
+	var err error
+	if privateKeyHex == "" {
+		keypair, err = secp256k1.GenerateSecp256k1KeyPair()
+		if err != nil {
+			return ethtypes.Address0xHex{}, err
+		}
+	} else {
+		privateKey, err := hex.DecodeString(strings.TrimPrefix(privateKeyHex, "0x"))
+		if err != nil {
+			return ethtypes.Address0xHex{}, err
+		}
+		keypair, err = secp256k1.NewSecp256k1KeyPair(privateKey)
+		if err != nil {
+			return ethtypes.Address0xHex{}, err
+		}
+	}
+	err = w.storeKeyPairSecret(ctx, keypair)
+	if err != nil {
+		return ethtypes.Address0xHex{}, err
+	}
+	return keypair.Address, nil
+}
+
+func (w *kmsWallet) storeKeyPairSecret(ctx context.Context, keypair *secp256k1.KeyPair) error {
+	secretName := strings.TrimPrefix(keypair.Address.String(), "0x")
+
+	// Attempt to create the secret
+	createInput := &secretsmanager.CreateSecretInput{
+		Name:         aws.String(secretName),
+		SecretBinary: keypair.PrivateKeyBytes(),
+	}
+
+	_, err := w.secretsClient.CreateSecret(ctx, createInput)
+	if err == nil {
+		return nil
+	}
+
+	var resourceExistsErr *secretsmanagertypes.ResourceExistsException
+	if errors.As(err, &resourceExistsErr) {
+		putInput := &secretsmanager.PutSecretValueInput{
+			SecretId:     aws.String(secretName),
+			SecretBinary: keypair.PrivateKeyBytes(),
+		}
+
+		_, putErr := w.secretsClient.PutSecretValue(ctx, putInput)
+		if putErr != nil {
+			return fmt.Errorf("failed to update existing secret '%s': %w", secretName, putErr)
+		}
+		return nil
+	}
+
+	// For other errors, return them
+	return fmt.Errorf("failed to create secret '%s': %w", secretName, err)
+}
+
+func (w *kmsWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
 	input := &kms.CreateKeyInput{
 		KeySpec:  kmstypes.KeySpecEccSecgP256k1,
 		KeyUsage: kmstypes.KeyUsageTypeSignVerify,
 		Origin:   kmstypes.OriginTypeAwsKms,
-		Tags: []kmstypes.Tag{
-			{
-				TagKey:   aws.String("CreatedBy"),
-				TagValue: aws.String("YourAppName"),
-			},
-		},
 	}
 	output, err := w.kmsClient.CreateKey(ctx, input)
 	if err != nil {
@@ -384,32 +532,11 @@ func (w *kmsWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethsig
 	log.L(ctx).Debugf("AWS KMS: Created key %s with address %s", keyName, address.Hex())
 
 	return ethsigner.CreateWalletResponse{
-		Address: strings.TrimPrefix(address.Hex(), "0x"),
-		KeyName: keyName,
+		Address: address.Hex(),
+		KeyName: strings.TrimPrefix(address.Hex(), "0x"),
 	}, nil
 }
 
-// ImportKey attempts to import a private key. AWS KMS does not support importing private keys.
-func (w *kmsWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtypes.Address0xHex, string, error) {
-	privateKey, err := hex.DecodeString(strings.TrimPrefix(privateKeyHex, "0x"))
-	if err != nil {
-		return ethtypes.Address0xHex{}, "", err
-	}
-
-	privateKeyECDSA, err := crypto.ToECDSA(privateKey)
-	if err != nil {
-		return ethtypes.Address0xHex{}, "", err
-	}
-
-	publicKeyECDSA := privateKeyECDSA.Public().(*ecdsa.PublicKey)
-	address := crypto.PubkeyToAddress(*publicKeyECDSA)
-
-	// AWS KMS does not support importing private keys directly.
-	// Therefore, we return an error indicating that importing private keys is not supported.
-	return ethtypes.Address0xHex(address), "", errors.New("importing private keys is not supported in AWS KMS")
-}
-
-// AddMappingKeyAddress adds a mapping between a keyName and an Ethereum address.
 func (w *kmsWallet) AddMappingKeyAddress(key string, address string) error {
 	if !w.conf.MappingKeyAddress.Enabled {
 		return errors.New("mapping feature not enabled")
@@ -420,7 +547,6 @@ func (w *kmsWallet) AddMappingKeyAddress(key string, address string) error {
 	return nil
 }
 
-// Close gracefully shuts down the wallet, stopping any ongoing refresh loops.
 func (w *kmsWallet) Close() error {
 	if w.stopRefresh != nil {
 		close(w.stopRefresh)
@@ -428,7 +554,6 @@ func (w *kmsWallet) Close() error {
 	return nil
 }
 
-// startRefreshLoop starts a background loop to periodically refresh the address-to-keyName mapping.
 func (w *kmsWallet) startRefreshLoop(ctx context.Context) {
 	if !w.conf.MappingKeyAddress.Enabled || !w.conf.MappingKeyAddress.Refresh.Enabled {
 		return
@@ -457,12 +582,10 @@ func (w *kmsWallet) startRefreshLoop(ctx context.Context) {
 	}()
 }
 
-// SignTypedDataV4 is not implemented for AWS KMS.
 func (w *kmsWallet) SignTypedDataV4(ctx context.Context, from ethtypes.Address0xHex, payload *eip712.TypedData) (*ethsigner.EIP712Result, error) {
 	return nil, errors.New("SignTypedDataV4 not implemented")
 }
 
-// GetAccounts retrieves all Ethereum addresses mapped to keys in AWS KMS.
 func (w *kmsWallet) GetAccounts(ctx context.Context) ([]*ethtypes.Address0xHex, error) {
 	w.mux.Lock()
 	defer w.mux.Unlock()
@@ -474,7 +597,6 @@ func (w *kmsWallet) GetAccounts(ctx context.Context) ([]*ethtypes.Address0xHex, 
 	return accounts, nil
 }
 
-// Refresh updates the address-to-keyName mapping.
 func (w *kmsWallet) Refresh(ctx context.Context) error {
 	if !w.conf.MappingKeyAddress.Enabled {
 		return nil
@@ -482,7 +604,6 @@ func (w *kmsWallet) Refresh(ctx context.Context) error {
 	return w.refreshAddressToKeyNameMapping(ctx)
 }
 
-// refreshAddressToKeyNameMapping refreshes the mapping between Ethereum addresses and AWS KMS KeyIds.
 func (w *kmsWallet) refreshAddressToKeyNameMapping(ctx context.Context) error {
 	log.L(ctx).Debugf("AWS KMS: Updating address mapping...")
 

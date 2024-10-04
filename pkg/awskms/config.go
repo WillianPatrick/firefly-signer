@@ -1,4 +1,4 @@
-// Copyright © 2024 Willian Patrick dos Santos
+// Copyright © 2024 Willian Patrick dos Santos - superhitec@gmail.com
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -31,6 +31,9 @@ var (
 	MappingKeyAddressEnabled         = config.AddRootKey("mappingKeyAddress.enabled")
 	MappingKeyAddressRefreshEnabled  = config.AddRootKey("mappingKeyAddress.refresh.enabled")
 	MappingKeyAddressRefreshInterval = config.AddRootKey("mappingKeyAddress.refresh.interval")
+	CacheMaxSize                     = config.AddRootKey("localSign.cache.maxSize")
+	CacheItemsToPrune                = config.AddRootKey("localSign.cache.itemsToPrune")
+	CacheTTL                         = config.AddRootKey("localSign.cache.ttl")
 )
 
 // InitConfig initializes known configuration keys for AWS KMS.
@@ -42,6 +45,9 @@ func InitConfig(section config.Section) {
 	section.AddKnownKey(string(MappingKeyAddressEnabled))
 	section.AddKnownKey(string(MappingKeyAddressRefreshEnabled))
 	section.AddKnownKey(string(MappingKeyAddressRefreshInterval))
+	section.AddKnownKey(string(CacheMaxSize))
+	section.AddKnownKey(string(CacheItemsToPrune))
+	section.AddKnownKey(string(CacheTTL))
 }
 
 // ReadConfig reads and parses the AWS KMS configuration from the provided section.
@@ -56,6 +62,14 @@ func ReadConfig(section config.Section) *Config {
 			Refresh: MappingKeyAddressRefresh{
 				Enabled:  section.GetBool(string(MappingKeyAddressRefreshEnabled)),
 				Interval: section.GetDuration(string(MappingKeyAddressRefreshInterval)),
+			},
+		},
+
+		LocalSign: LocalSign{
+			Cache: ConfigCache{
+				MaxSize:      section.GetInt64(string(CacheMaxSize)),
+				ItemsToPrune: uint32(section.GetInt(string(CacheItemsToPrune))),
+				TTL:          section.GetDuration(string(CacheTTL)),
 			},
 		},
 	}
@@ -80,4 +94,15 @@ type Config struct {
 	AccessKeyID       string            // AWS Access Key ID for authentication
 	SecretAccessKey   string            // AWS Secret Access Key for authentication
 	MappingKeyAddress MappingKeyAddress // Mapping configuration settings between addresses and Key IDs
+	LocalSign         LocalSign
+}
+
+type LocalSign struct {
+	Cache ConfigCache
+}
+
+type ConfigCache struct {
+	MaxSize      int64
+	ItemsToPrune uint32
+	TTL          time.Duration
 }

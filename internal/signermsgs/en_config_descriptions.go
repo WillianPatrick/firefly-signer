@@ -76,6 +76,9 @@ var (
 	ConfigAWSKMSMappingKeyAddressEnable          = ffc("config.awsKMS.mappingKeyAddress.enabled", "Enable mapping kayname and wallet address", "boolean")
 	ConfigAWSKMSMappingKeyAddressRefreshEnabled  = ffc("config.awsKMS.mappingKeyAddress.refresh.enabled", "Enable automatic refresh mapping kayname and wallet address", "boolean")
 	ConfigAWSKMSMappingKeyAddressRefreshInterval = ffc("config.awsKMS.mappingKeyAddress.refresh.interval", "Interval time to automatic refresh", "duration")
+	ConfigAWSKMSLocalSignCacheMaxSize            = ffc("config.awsKMS.localSign.cache.maxSize", "The maximum size of the cache for AWS Secrets", "number")
+	ConfigAWSKMSLocalSignCacheItemsToPrune       = ffc("config.awsKMS.localSign.cache.itemsToPrune", "The number of items to prune from the cache when it exceeds the maximum size", "number")
+	ConfigAWSKMSLocalSignCacheTTL                = ffc("config.awsKMS.localSign.cache.ttl", "The TTL (time-to-live) for cache entries in  AWS Secrets", "duration")
 
 	// HashiCorp Vault Configurations
 	ConfigHashicorpVaultEnabled                          = ffc("config.hashicorpVault.enabled", "Whether the HashiCorp Vault is enabled", "boolean")
