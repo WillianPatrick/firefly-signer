@@ -54,6 +54,7 @@ var (
 	ConfigBackendURL      = ffc("config.backend.url", "URL for the backend JSON/RPC server / blockchain node", "url")
 	ConfigBackendProxyURL = ffc("config.backend.proxy.url", "Optional HTTP proxy URL", "url")
 
+	// Azure KeyVault Configurations
 	ConfigAzureKeyVaultEnabled                          = ffc("config.azureKeyVault.enabled", "Whether the Azure Key Vault is enabled", "boolean")
 	ConfigAzureKeyVaultURL                              = ffc("config.azureKeyVault.vaultURL", "The URL of the Azure Key Vault", "string")
 	ConfigAzureKeyVaultClientID                         = ffc("config.azureKeyVault.clientID", "The Client ID for the Azure Key Vault", "string")
@@ -97,6 +98,10 @@ var (
 	ConfigCacheItemsToPrune = ffc("config.cache.itemsToPrune", "The number of items to prune from the cache when it exceeds the maximum size", "number")
 	ConfigCacheMaxSize      = ffc("config.cache.maxSize", "The maximum size of the cache for Azure Key Vault", "number")
 	ConfigCacheTTL          = ffc("config.cache.ttl", "The TTL (time-to-live) for cache entries in Azure Key Vault", "duration")
+
+	ConfigLocalSignCacheMaxSize      = ffc("config.localSign.cache.maxSize", "The maximum size of the cache for AWS Secrets", "number")
+	ConfigLocalSignCacheItemsToPrune = ffc("config.localSign.cache.itemsToPrune", "The number of items to prune from the cache when it exceeds the maximum size", "number")
+	ConfigLocalSignCacheTTL          = ffc("config.localSign.cache.ttl", "The TTL (time-to-live) for cache entries in  AWS Secrets", "duration")
 
 	ConfigMappingKeyAddressEnable          = ffc("config.mappingKeyAddress.enabled", "Enable mapping kayname and wallet address", "boolean")
 	ConfigMappingKeyAddressRefreshEnabled  = ffc("config.mappingKeyAddress.refresh.enabled", "Enable automatic refresh mapping kayname and wallet address", "boolean")

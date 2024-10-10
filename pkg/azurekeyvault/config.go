@@ -1,4 +1,4 @@
-// Copyright © 2024 Willian Patrick dos Santos
+// Copyright © 2024 Willian Patrick dos Santos - superhitec@gmail.com
 //
 // SPDX-License-Identifier: Apache-2.0
 //
