@@ -10,6 +10,5 @@ test/keystore_toml/ignore_dir
 download_deps.ps1
 deps
 firefly.ffsigner
-vendor.zip
 vendor/*
 ffsigner/data/*
