@@ -4,7 +4,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
-// you may obtain a copy of the License at
+// You may obtain a copy of the License at
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -69,6 +69,9 @@ type Wallet interface {
 	AddMappingKeyAddress(key string, address string) error
 	Initialize(ctx context.Context) error
 	Close() error
+	// Adicionado para assinatura de mensagens
+	RemoteSignMessage(ctx context.Context, msg []byte, keyID string) ([]byte, error)
+	VerifySignature(msg []byte, sig []byte, keyID string) (bool, error)
 }
 
 // kmsWallet implements the Wallet interface using AWS KMS.
@@ -271,8 +274,6 @@ func (w *kmsWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, 
 
 	// Compute the Keccak-256 hash of the transaction (Ethereum message hash)
 	ethHash := signer.Hash(tx)
-
-	// Apply SHA-256 to the Keccak-256 hash (AWS KMS requires SHA-256)
 	sha256Hash := sha256.Sum256(ethHash.Bytes())
 
 	keyName, err := w.getKeyNameForAddress(ctx, from)
@@ -294,73 +295,26 @@ func (w *kmsWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, 
 		return nil, fmt.Errorf("AWS KMS Sign operation failed: %w", err)
 	}
 
-	derSignature := signOutput.Signature
+	signature := signOutput.Signature
+	// Extract r and s components from the signature
+	r := new(big.Int).SetBytes(signature[:32])
+	s := new(big.Int).SetBytes(signature[32:64])
 
-	// Parse the DER-encoded signature to extract r and s
-	r, s, err := parseDERSignature(derSignature)
-	if err != nil {
-		return nil, err
-	}
-
-	// Ensure s is less than or equal to half the order of the curve (EIP-2 compliance)
+	// Ensure s is in the lower half of the curve order
 	curveOrder := crypto.S256().Params().N
 	halfOrder := new(big.Int).Rsh(curveOrder, 1)
+
 	if s.Cmp(halfOrder) > 0 {
 		s.Sub(curveOrder, s)
 	}
 
-	// Prepare r and s bytes
-	rBytes := r.Bytes()
-	sBytes := s.Bytes()
-	rPadded := make([]byte, 32)
-	sPadded := make([]byte, 32)
-	copy(rPadded[32-len(rBytes):], rBytes)
-	copy(sPadded[32-len(sBytes):], sBytes)
-
-	signature := make([]byte, 64)
-	copy(signature, rPadded)
-	copy(signature[32:], sPadded)
-
-	// Attempt to recover the public key using the SHA-256 hash
-	publicKey, err := w.getPublicKeyForKeyName(ctx, keyName)
-	if err != nil {
-		return nil, err
-	}
-	expectedPubKeyBytes := crypto.FromECDSAPub(publicKey)
-
-	var v byte
-	found := false
-	for recID := 0; recID < 2; recID++ {
-		v = byte(recID + 27)
-		sig := make([]byte, 65)
-		copy(sig, signature)
-		sig[64] = v
-
-		// Recover the public key using the SHA-256 hash
-		pubKeyRecovered, err := crypto.SigToPub(sha256Hash[:], sig)
-		if err == nil && pubKeyRecovered != nil {
-			pubKeyBytes := crypto.FromECDSAPub(pubKeyRecovered)
-			if bytes.Equal(pubKeyBytes, expectedPubKeyBytes) {
-				found = true
-				break
-			}
-		}
+	// Calculate recovery ID `v`
+	v := byte(chainID*2 + 35 + 27)
+	if s.Cmp(halfOrder) > 0 {
+		v++
 	}
 
-	if !found {
-		return nil, errors.New("failed to recover public key")
-	}
-
-	// Adjust v for EIP-155
-	vBigInt := big.NewInt(int64(v))
-	if chainID != 0 {
-		vBigInt.Add(vBigInt, big.NewInt(int64(chainID*2+8)))
-	}
-
-	// Assemble the signature
-	sig := make([]byte, 65)
-	copy(sig, signature)
-	sig[64] = byte(vBigInt.Uint64())
+	sig := append(append(r.Bytes(), s.Bytes()...), v)
 
 	// Sign the transaction
 	signedTx, err := tx.WithSignature(signer, sig)
@@ -376,6 +330,194 @@ func (w *kmsWallet) RemoteSign(ctx context.Context, txn *ethsigner.Transaction, 
 	log.L(ctx).Debugf("AWS KMS - Remote Sign - Chain ID: %d - From: %s, Signed transaction", chainID, key)
 
 	return signedTxBytes, nil
+}
+
+// computeRecoveryID computes the recovery ID (v) needed for the signature.
+func computeRecoveryID(msgHash []byte, r, s *big.Int, w *kmsWallet, keyName string) (byte, error) {
+	signatureRS := make([]byte, 64)
+	copy(signatureRS[:32], padBytes(r.Bytes(), 32))
+	copy(signatureRS[32:], padBytes(s.Bytes(), 32))
+
+	// Retrieve the public key bytes
+	publicKey, err := w.getPublicKeyForKeyName(context.Background(), keyName)
+	if err != nil {
+		return 0, err
+	}
+	expectedPubKeyBytes := crypto.FromECDSAPub(publicKey)
+
+	// Try recovery IDs 0 and 1
+	for recoveryID := 0; recoveryID < 2; recoveryID++ {
+		sig := make([]byte, 65)
+		copy(sig[:64], signatureRS)
+		sig[64] = byte(recoveryID)
+
+		// Recover public key
+		pubKeyRecovered, err := crypto.SigToPub(msgHash, sig)
+		if err != nil {
+			continue
+		}
+		pubKeyRecoveredBytes := crypto.FromECDSAPub(pubKeyRecovered)
+
+		if bytes.Equal(pubKeyRecoveredBytes, expectedPubKeyBytes) {
+			return byte(recoveryID), nil
+		}
+	}
+
+	return 0, errors.New("failed to compute recovery ID")
+}
+
+// padBytes pads the byte slice to the specified length
+func padBytes(slice []byte, length int) []byte {
+	if len(slice) >= length {
+		return slice
+	}
+	padded := make([]byte, length)
+	copy(padded[length-len(slice):], slice)
+	return padded
+}
+
+// RemoteSignMessage signs a message using AWS KMS and returns the signature.
+func (w *kmsWallet) RemoteSignMessage(ctx context.Context, msg []byte, keyID string) ([]byte, error) {
+	// Criar contexto com timeout
+	kmsCtx, cancel := context.WithTimeout(context.Background(), AWSKMSTimeout)
+	defer cancel()
+
+	// Calcular SHA-256 do hash da mensagem
+	sha256Hash := sha256.Sum256(msg)
+
+	// Preparar entrada para assinatura
+	signInput := &kms.SignInput{
+		KeyId:            aws.String(keyID),
+		Message:          sha256Hash[:],
+		MessageType:      kmstypes.MessageTypeDigest,
+		SigningAlgorithm: kmstypes.SigningAlgorithmSpecEcdsaSha256,
+	}
+
+	// Chamar AWS KMS para assinar
+	signOutput, err := w.kmsClient.Sign(kmsCtx, signInput)
+	if err != nil {
+		return nil, fmt.Errorf("AWS KMS Sign operation failed: %w", err)
+	}
+
+	derSignature := signOutput.Signature
+
+	// Parsear assinatura DER para r e s
+	r, s, err := parseDERSignature(derSignature)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ajustar s para ser <= half curve order
+	curveOrder := crypto.S256().Params().N
+	halfOrder := new(big.Int).Rsh(curveOrder, 1)
+	if s.Cmp(halfOrder) > 0 {
+		s.Sub(curveOrder, s)
+	}
+
+	// Padronizar r e s para 32 bytes cada
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	rPadded := make([]byte, 32)
+	sPadded := make([]byte, 32)
+	copy(rPadded[32-len(rBytes):], rBytes)
+	copy(sPadded[32-len(sBytes):], sBytes)
+
+	signature := make([]byte, 64)
+	copy(signature, rPadded)
+	copy(signature[32:], sPadded)
+
+	// Tentar recuperar a chave pública com v=27 e v=28
+	publicKey, err := w.getPublicKeyForKeyName(ctx, keyID)
+	if err != nil {
+		return nil, err
+	}
+	expectedPubKeyBytes := crypto.FromECDSAPub(publicKey)
+
+	var v byte
+	found := false
+	for recID := 0; recID < 2; recID++ {
+		v = byte(recID + 27)
+		sig := make([]byte, 65)
+		copy(sig, signature)
+		sig[64] = v
+
+		// Recuperar a chave pública usando o SHA-256 hash
+		pubKeyRecovered, err := crypto.SigToPub(sha256Hash[:], sig)
+		if err == nil && pubKeyRecovered != nil {
+			pubKeyBytes := crypto.FromECDSAPub(pubKeyRecovered)
+			if bytes.Equal(pubKeyBytes, expectedPubKeyBytes) {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		return nil, errors.New("failed to recover public key")
+	}
+
+	// Assegurar que v está correto (27 ou 28)
+	// Para assinaturas de mensagens, v geralmente é 27 ou 28
+	// Não é necessário ajustá-lo para EIP-155
+	sig := make([]byte, 65)
+	copy(sig, signature)
+	sig[64] = v
+
+	return sig, nil
+}
+
+// VerifySignature verifica se a assinatura é válida para a mensagem e a chave pública fornecida.
+func (w *kmsWallet) VerifySignature(msg []byte, sig []byte, keyID string) (bool, error) {
+	// Calcular SHA-256 do hash da mensagem
+	sha256Hash := sha256.Sum256(msg)
+
+	// Recuperar a chave pública
+	publicKey, err := w.getPublicKeyForKeyName(context.Background(), keyID)
+	if err != nil {
+		return false, err
+	}
+
+	// Dividir a assinatura em r, s e v
+	if len(sig) != 65 {
+		return false, errors.New("invalid signature length")
+	}
+	r := new(big.Int).SetBytes(sig[:32])
+	s := new(big.Int).SetBytes(sig[32:64])
+	v := sig[64]
+
+	// Ajustar s se necessário
+	curveOrder := crypto.S256().Params().N
+	halfOrder := new(big.Int).Rsh(curveOrder, 1)
+	if s.Cmp(halfOrder) > 0 {
+		s.Sub(curveOrder, s)
+	}
+
+	// Tentar recuperar a chave pública com v=27 e v=28
+	var found bool
+	for recID := 0; recID < 2; recID++ {
+		v = byte(recID + 27)
+		sigTemp := make([]byte, 65)
+		copy(sigTemp, sig[:64])
+		sigTemp[64] = v
+
+		pubKeyRecovered, err := crypto.SigToPub(sha256Hash[:], sigTemp)
+		if err == nil && pubKeyRecovered != nil {
+			pubKeyBytes := crypto.FromECDSAPub(pubKeyRecovered)
+			expectedPubKeyBytes := crypto.FromECDSAPub(publicKey)
+			if bytes.Equal(pubKeyBytes, expectedPubKeyBytes) {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		return false, errors.New("failed to verify signature with the provided public key")
+	}
+
+	// Verificar a assinatura usando a chave pública
+	verified := ecdsa.Verify(publicKey, sha256Hash[:], r, s)
+	return verified, nil
 }
 
 // parseDERSignature parses a DER-encoded ECDSA signature and returns r and s values.
@@ -563,8 +705,9 @@ func (w *kmsWallet) storeKeyPairSecret(ctx context.Context, keypair *secp256k1.K
 }
 
 // CreateKey creates a new KMS key and associates it with an Ethereum address via tagging.
+// Nota: Essa assinatura não será válida para transações Ethereum devido à incompatibilidade de hashes.
 func (w *kmsWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
-	// Clone the context with a timeout
+	// Clone the context com timeout
 	kmsCtx, cancel := context.WithTimeout(context.Background(), AWSKMSTimeout)
 	defer cancel()
 
@@ -587,11 +730,11 @@ func (w *kmsWallet) CreateKey(ctx context.Context, privateKeyHex string) (ethsig
 
 	address := crypto.PubkeyToAddress(*pubKey)
 
-	// Clone the context with a timeout for tagging
+	// Clone the context com timeout para tagging
 	tagCtx, cancelTag := context.WithTimeout(context.Background(), AWSKMSTimeout)
 	defer cancelTag()
 
-	// Add the tag to the KMS resource for mapping
+	// Adicionar a tag ao recurso KMS para mapeamento
 	_, err = w.kmsClient.TagResource(tagCtx, &kms.TagResourceInput{
 		KeyId: aws.String(keyName),
 		Tags: []kmstypes.Tag{
@@ -655,7 +798,7 @@ func (w *kmsWallet) startRefreshLoop(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				// Use a separate context with timeout for each refresh operation
+				// Use a separate context com timeout para cada operação de refresh
 				refreshCtx, cancel := context.WithTimeout(context.Background(), AWSKMSTimeout)
 				err := w.refreshAddressToKeyNameMapping(refreshCtx)
 				cancel()
@@ -715,7 +858,7 @@ func (w *kmsWallet) Refresh(ctx context.Context) error {
 	if !w.conf.MappingKeyAddress.Enabled {
 		return nil
 	}
-	// Use a separate context with timeout for refresh
+	// Use a separate context com timeout para refresh
 	refreshCtx, cancel := context.WithTimeout(context.Background(), AWSKMSTimeout)
 	defer cancel()
 	return w.refreshAddressToKeyNameMapping(refreshCtx)
@@ -757,7 +900,7 @@ func (w *kmsWallet) refreshAddressToKeyNameMapping(ctx context.Context) error {
 			}
 
 			if (address == common.Address{}) {
-				// If there is no EthereumAddress tag, skip this key
+				// Se não há tag EthereumAddress, pular esta chave
 				continue
 			}
 
