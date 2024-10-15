@@ -35,7 +35,7 @@ type Wallet interface {
 	// @willianpatrick - 23/07/2024
 	// CreateWallet optional private key
 	CreateWallet(ctx context.Context, password string, privateKeyHex string) (CreateWalletResponse, error)
-	AddMappingKeyAddress(key string, address string) error
+	AddMappingKeyAddress(address string, data []byte) error
 }
 
 type WalletTypedData interface {

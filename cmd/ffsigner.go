@@ -33,7 +33,7 @@ import (
 	"github.com/hyperledger/firefly-signer/internal/rpcserver"
 	"github.com/hyperledger/firefly-signer/internal/signerconfig"
 	"github.com/hyperledger/firefly-signer/internal/signermsgs"
-	"github.com/hyperledger/firefly-signer/pkg/awskms"
+	"github.com/hyperledger/firefly-signer/pkg/awswallet"
 	"github.com/hyperledger/firefly-signer/pkg/azurekeyvault"
 	"github.com/hyperledger/firefly-signer/pkg/ethsigner"
 	"github.com/hyperledger/firefly-signer/pkg/fswallet"
@@ -112,18 +112,18 @@ func run() error {
 			}
 		}
 
-	case config.GetBool(signerconfig.AWSKMSEnabled):
+	case config.GetBool(signerconfig.AWSWalletEnabled):
 		// AWS KMS is enabled
-		awsWallet, err := awskms.NewAWSKMSWallet(ctx, awskms.ReadConfig(signerconfig.AWSKMSConfig))
+		w, err := awswallet.NewAWSKMSWallet(ctx, awswallet.ReadConfig(signerconfig.AWSWalletConfig))
 		if err != nil {
 			return err
 		}
-		wallet = awsWallet
+		wallet = w
 
 		// Handle mapping and refresh endpoints if enabled
-		if config.GetBool(signerconfig.AWSKMSMappingKeysEnabled) {
+		if config.GetBool(signerconfig.AWSWalletKMSEnabled) && !config.GetBool(signerconfig.AWSWalletSecretsEnabled) {
 			router.HandleFunc("/wallets/mapping", addMappingKeyAddressHandler(wallet)).Methods("POST")
-			if config.GetBool(signerconfig.AWSKMSMappingKeysRefreshEnabled) {
+			if config.GetBool(signerconfig.AWSWalletKMSMemoryMappingAddressKeyNameRefreshEnabled) {
 				router.HandleFunc("/wallets/refresh", refreshWalletHandler(wallet)).Methods("POST")
 			}
 		}
@@ -211,7 +211,7 @@ func addMappingKeyAddressHandler(wallet ethsigner.Wallet) http.HandlerFunc {
 			return
 		}
 
-		if err := wallet.AddMappingKeyAddress(req.KeyName, req.Address); err != nil {
+		if err := wallet.AddMappingKeyAddress(req.Address, []byte(req.KeyName)); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to add key address to mapping: %v", err), http.StatusInternalServerError)
 			return
 		}

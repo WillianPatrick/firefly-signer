@@ -31,7 +31,7 @@ func (_m *Wallet) Close() error {
 }
 
 // AddMappingKeyAddress implements Wallet.
-func (m *Wallet) AddMappingKeyAddress(key string, address string) error {
+func (m *Wallet) AddMappingKeyAddress(address string, data []byte) error {
 	return nil
 }
 

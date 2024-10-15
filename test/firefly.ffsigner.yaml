@@ -1,37 +1,61 @@
+server:
+  port: 8588
+  address: 127.0.0.1
+
+backend:
+  chainId: 381660001
+  url: http://127.0.0.1:8545
+
+security:
+  anonymizedAddressKey: YOUR_CUSTOM_PASSWORD_KEY # Usado para hashing, codificar e decodificar dados sensíveis utilizando a chave de composição do endereço
+
 fileWallet:
   enabled: true
-  path: "./test/keystore_toml"
-  disableListener: true
+  path: ./data/keystore
   filenames:
-    primaryExt: ".toml"
+    primaryExt: .toml
   metadata:
-    format: auto
     keyFileProperty: '{{ index .signing "key-file" }}'
     passwordFileProperty: '{{ index .signing "password-file" }}'
-azureKeyVault:
+
+azureWallet:
   enabled: false
-  vaultURL: https://mykeyvault.vault.azure.net/
-  clientID: your-client-id
-  clientSecret: your-client-secret
-  tenantID: your-tenant-id
-  cache:
-    maxSize: 1000
-    itemsToPrune: 100
-    ttl: 1h    
-awsKMS:
-  enabled: false
-  region: us-east-1 
-  accessKeyID: YOUR_AWS_ACCESS_KEY_ID        
-  secretAccessKey: YOUR_AWS_SECRET_ACCESS_KEY  
-  remoteSign: false
-  mappingKeyAddress:
-    enabled: false
-    refresh:
+  vaultURL: https://YOUR_VAULT_URL.vault.azure.net
+  clientID: YOUR_CLIENT_ID
+  clientSecret: YOUR_CLIENT_SECRET
+  tenantID: YOUR_TENANT_ID
+  secrets: 
+    enabled: true
+    cache:
       enabled: false
-      interval: 5m  
-  cache:
-    maxSize: 1000
-    itemsToPrune: 100
-    ttl: 1h    
-backend:
-  chainId: 0
+      maxSize: 1000
+      itemsToPrune: 100
+      ttl: 1h     
+  keyVault: 
+    enabled: true
+    memoryMappingAddressKeyName:  #Only required anable if secrets inactive and keyvault active
+     refresh:
+        enabled: false
+        interval: 5m
+        
+awsWallet:
+  enabled: false
+  region: YOUR_REGION
+  accessKeyID: YOUR_ACCESS_KEY       
+  secretAccessKey: YOUR_SECRET_ACCESS_KEY
+  secrets: 
+    enabled: true
+    cache:
+      enabled: false
+      maxSize: 1000
+      itemsToPrune: 100
+      ttl: 1h      
+  kms: 
+    enabled: true
+    memoryMappingAddressKeyName: #Automatic enabled if secrets inactived and kms actived
+      refresh:
+        enabled: false
+        interval: 5m   
+        
+log:
+  level: debug

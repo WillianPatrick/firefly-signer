@@ -111,7 +111,7 @@ type fsWallet struct {
 	fsListenerDone    chan struct{}
 }
 
-func (w *fsWallet) AddMappingKeyAddress(key string, address string) error {
+func (w *fsWallet) AddMappingKeyAddress(address string, data []byte) error {
 	return nil
 }
 

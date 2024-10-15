@@ -505,11 +505,11 @@ func (w *azWallet) ImportKey(ctx context.Context, privateKeyHex string) (ethtype
 	return ethtypes.Address0xHex(address), nil
 }
 
-func (w *azWallet) AddMappingKeyAddress(key string, address string) error {
+func (w *azWallet) AddMappingKeyAddress(address string, data []byte) error {
 	if !w.conf.MappingKeyAddress.Enabled {
 		return errors.New("mapping feature not enabled")
 	}
-	w.addressToKeyName[common.HexToAddress(address)] = strings.TrimPrefix(key, "0x")
+	w.addressToKeyName[common.HexToAddress(address)] = strings.TrimPrefix(string(data), "0x")
 	return nil
 }
 

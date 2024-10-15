@@ -47,7 +47,7 @@ const keyPath = "/keys/"
 type Wallet interface {
 	ethsigner.WalletTypedData
 	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error)
-	AddMappingKeyAddress(key string, address string) error
+	AddMappingKeyAddress(address string, data []byte) error
 	Initialize(ctx context.Context) error
 	Close() error
 }
@@ -482,11 +482,11 @@ func (w *vaultWallet) ImportKey(ctx context.Context, privateKeyHex string) (etht
 	return ethtypes.Address0xHex(address), keyName, nil
 }
 
-func (w *vaultWallet) AddMappingKeyAddress(key string, address string) error {
+func (w *vaultWallet) AddMappingKeyAddress(address string, data []byte) error {
 	if !w.conf.MappingKeyAddress.Enabled {
 		return errors.New("recurso de mapeamento não habilitado")
 	}
-	w.addressToKeyName[common.HexToAddress(address)] = key
+	w.addressToKeyName[common.HexToAddress(address)] = string(data)
 	return nil
 }
 
