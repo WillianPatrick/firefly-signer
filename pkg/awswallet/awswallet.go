@@ -167,7 +167,7 @@ func (w *kmsWallet) Initialize(ctx context.Context) error {
 		w.startRefreshLoop(ctx)
 	}
 
-	if !w.conf.Secrets.Enabled && w.conf.KMS.Enabled {
+	if !w.conf.Secrets.Enabled && w.conf.KMS.Enabled && !w.conf.KMS.MappingAddressKeyNameRefresh.Enabled {
 		err := w.refreshAddressToKeyNameMapping(ctx)
 		if err != nil {
 			return fmt.Errorf("AWS: failed initialize KMS Key mapping: %w", err)
