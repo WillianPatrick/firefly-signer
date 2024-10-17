@@ -2,10 +2,6 @@ server:
   port: 8588
   address: 127.0.0.1
 
-backend:
-  chainId: 381660001
-  url: http://127.0.0.1:8545
-
 security:
   anonymizedAddressKey: YOUR_CUSTOM_PASSWORD_KEY # Usado para hashing, codificar e decodificar dados sensíveis utilizando a chave de composição do endereço
 
