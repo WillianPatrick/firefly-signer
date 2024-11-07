@@ -21,7 +21,6 @@ import (
 	"github.com/hyperledger/firefly-common/pkg/httpserver"
 	"github.com/hyperledger/firefly-common/pkg/wsclient"
 	"github.com/hyperledger/firefly-signer/pkg/awswallet"
-	"github.com/hyperledger/firefly-signer/pkg/azurekeyvault"
 	"github.com/hyperledger/firefly-signer/pkg/fswallet"
 	"github.com/spf13/viper"
 )
@@ -30,28 +29,24 @@ var ffc = config.AddRootKey
 
 // Configuration keys
 var (
-	BackendChainID                    = ffc("backend.chainId")
-	FileWalletEnabled                 = ffc("fileWallet.enabled")
-	KeyVaultEnabled                   = ffc("azureKeyVault.enabled")
-	KeyVaultMappingKeysEnabled        = ffc("azureKeyVault.mappingKeyAddress.enabled")
-	KeyVaultMappingKeysRefreshEnabled = ffc("azureKeyVault.mappingKeyAddress.refresh.enabled")
+	BackendChainID    = ffc("backend.chainId")
+	FileWalletEnabled = ffc("fileWallet.enabled")
 
 	// AWS Wallet
-	AWSWalletEnabled                                      = ffc("awsWallet.enabled")
-	AWSWalletSecretsEnabled                               = ffc("awsWallet.secrets.enabled")
-	AWSWalletSecretsCacheEnabled                          = ffc("awsWallet.secrets.cache.enabled")
-	AWSWalletKMSEnabled                                   = ffc("awsWallet.kms.enabled")
-	AWSWalletKMSMemoryMappingAddressKeyNameRefreshEnabled = ffc("awsWallet.kms.memoryMappingAddressKeyName.refresh.enabled")
+	AWSWalletEnabled        = ffc("awsWallet.enabled")
+	AWSWalletUseSecrets     = ffc("awsWallet.useSecrets")
+	AWSWalletUseKMS         = ffc("awsWallet.useKMS")
+	AWSWalletEncryptSecrets = ffc("awsWallet.encryptSecrets")
 )
 
 // Configuration sections
 var (
 	ServerConfig     config.Section
-	Security         config.Section
+	MongoDBConfig    config.Section
+	SecurityConfig   config.Section
 	CorsConfig       config.Section
 	BackendConfig    config.Section
 	FileWalletConfig config.Section
-	KeyVaultConfig   config.Section
 	AWSWalletConfig  config.Section
 )
 
@@ -61,13 +56,11 @@ func setDefaults() {
 	// viper.SetDefault(string(SecurityAnonymizedAddressKey), "#Firefly-Signer!")
 	viper.SetDefault(string(BackendChainID), -1)
 	viper.SetDefault(string(FileWalletEnabled), true)
-	viper.SetDefault(string(KeyVaultEnabled), false)
-	viper.SetDefault(string(KeyVaultMappingKeysEnabled), false)
-	viper.SetDefault(string(KeyVaultMappingKeysRefreshEnabled), false)
+
 	viper.SetDefault(string(AWSWalletEnabled), false)
-	viper.SetDefault(string(AWSWalletSecretsEnabled), true)
-	viper.SetDefault(string(AWSWalletKMSEnabled), true)
-	viper.SetDefault(string(AWSWalletKMSMemoryMappingAddressKeyNameRefreshEnabled), false)
+	viper.SetDefault(string(AWSWalletUseSecrets), true)
+	viper.SetDefault(string(AWSWalletUseKMS), true)
+	viper.SetDefault(string(AWSWalletEncryptSecrets), true)
 }
 
 func Reset() {
@@ -85,10 +78,8 @@ func Reset() {
 	FileWalletConfig = config.RootSection("fileWallet")
 	fswallet.InitConfig(FileWalletConfig)
 
-	KeyVaultConfig = config.RootSection("azureKeyVault")
-	azurekeyvault.InitConfig(KeyVaultConfig)
-
-	Security = config.RootSection("security")
+	SecurityConfig = config.RootSection("security")
 	AWSWalletConfig = config.RootSection("awsWallet")
-	awswallet.InitConfig(AWSWalletConfig, Security)
+	MongoDBConfig = config.RootSection("mongodb")
+	awswallet.InitConfig(AWSWalletConfig, SecurityConfig, MongoDBConfig)
 }

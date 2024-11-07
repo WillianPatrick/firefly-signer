@@ -17,48 +17,61 @@
 package awswallet
 
 import (
-	"time"
-
 	"github.com/hyperledger/firefly-common/pkg/config"
 )
 
 var securitySection config.Section
+var walletDBSection config.Section
 
 // Configuration keys for AWS KMS
 var (
-	ConfigSecurityPrivateAddresKey                      = config.AddRootKey("anonymizedAddressKey")
-	ConfigEnabled                                       = config.AddRootKey("enabled")
-	ConfigRegion                                        = config.AddRootKey("region")
-	ConfigAccessKeyID                                   = config.AddRootKey("accessKeyID")
-	ConfigSecretAccessKey                               = config.AddRootKey("secretAccessKey")
-	ConfigSecretsEnabled                                = config.AddRootKey("secrets.enabled")
-	ConfigSecretsCacheEnabled                           = config.AddRootKey("secrets.cache.enabled")
-	ConfigSecretsCacheMaxSize                           = config.AddRootKey("secrets.cache.maxSize")
-	ConfigSecretsCacheItemsToPrune                      = config.AddRootKey("secrets.cache.itemsToPrune")
-	ConfigSecretsCacheTTL                               = config.AddRootKey("secrets.cache.ttl")
-	ConfigKMSEnabled                                    = config.AddRootKey("kms.enabled")
-	ConfigKMSMemoryMappingAddressKeyNameRefreshEnabled  = config.AddRootKey("kms.memoryMappingAddressKeyName.refresh.enabled")
-	ConfigKMSMemoryMappingAddressKeyNameRefreshInterval = config.AddRootKey("kms.memoryMappingAddressKeyName.refresh.interval")
+	ConfigSecurityPrivateAddresKey = config.AddRootKey("anonymizedAddressKey")
+	ConfigMongoDBConnectionString  = config.AddRootKey("connectionString")
+	ConfigMongoDBDatabaseName      = config.AddRootKey("databaseName")
+	ConfigMongoDBCollectionName    = config.AddRootKey("collectionName")
+	ConfigEnabled                  = config.AddRootKey("enabled")
+	ConfigRegion                   = config.AddRootKey("region")
+	ConfigAccessKeyID              = config.AddRootKey("accessKeyID")
+	ConfigSecretAccessKey          = config.AddRootKey("secretAccessKey")
+	ConfigUseSecrets               = config.AddRootKey("useSecrets")
+	ConfigUseKMS                   = config.AddRootKey("useKMS")
+	ConfigEncryptSecrets           = config.AddRootKey("encryptSecrets")
 )
 
-// InitConfig initializes known configuration keys for AWS KMS.
-func InitConfig(section config.Section, security config.Section) {
+// Config holds the complete configuration for AWS KMS.
+type Config struct {
+	Region            string
+	AccessKeyID       string
+	SecretAccessKey   string
+	UseSecrets        bool
+	UseKMS            bool
+	EncryptSecrets    bool
+	PrivateAddressKey string
+	MongoDB           MongoDBConfig
+}
 
-	securitySection = security
+type MongoDBConfig struct {
+	ConnectionString string
+	DatabaseName     string
+	CollectionName   string
+}
+
+// InitConfig initializes known configuration keys for AWS KMS.
+func InitConfig(walletSection config.Section, securitySection config.Section, walletDBSection config.Section) {
+
 	securitySection.AddKnownKey(string(ConfigSecurityPrivateAddresKey))
 
-	section.AddKnownKey(string(ConfigEnabled))
-	section.AddKnownKey(string(ConfigRegion))
-	section.AddKnownKey(string(ConfigAccessKeyID))
-	section.AddKnownKey(string(ConfigSecretAccessKey))
-	section.AddKnownKey(string(ConfigSecretsEnabled), true)
-	section.AddKnownKey(string(ConfigSecretsCacheEnabled), true)
-	section.AddKnownKey(string(ConfigSecretsCacheMaxSize), int64(1000))
-	section.AddKnownKey(string(ConfigSecretsCacheItemsToPrune), uint32(100))
-	section.AddKnownKey(string(ConfigSecretsCacheTTL), 1*time.Hour)
-	section.AddKnownKey(string(ConfigKMSEnabled), true)
-	section.AddKnownKey(string(ConfigKMSMemoryMappingAddressKeyNameRefreshEnabled), true)
-	section.AddKnownKey(string(ConfigKMSMemoryMappingAddressKeyNameRefreshInterval), 5*time.Minute)
+	walletDBSection.AddKnownKey(string(ConfigMongoDBConnectionString))
+	walletDBSection.AddKnownKey(string(ConfigMongoDBDatabaseName))
+	walletDBSection.AddKnownKey(string(ConfigMongoDBCollectionName))
+
+	walletSection.AddKnownKey(string(ConfigEnabled))
+	walletSection.AddKnownKey(string(ConfigRegion))
+	walletSection.AddKnownKey(string(ConfigAccessKeyID))
+	walletSection.AddKnownKey(string(ConfigSecretAccessKey))
+	walletSection.AddKnownKey(string(ConfigUseSecrets), true)
+	walletSection.AddKnownKey(string(ConfigUseKMS), true)
+	walletSection.AddKnownKey(string(ConfigEncryptSecrets), true)
 }
 
 // ReadConfig reads and parses the AWS KMS configuration from the provided section.
@@ -68,55 +81,13 @@ func ReadConfig(section config.Section) *Config {
 		PrivateAddressKey: securitySection.GetString(string(ConfigSecurityPrivateAddresKey)),
 		AccessKeyID:       section.GetString(string(ConfigAccessKeyID)),
 		SecretAccessKey:   section.GetString(string(ConfigSecretAccessKey)),
-		Secrets: Secrets{
-			Enabled: section.GetBool(string(ConfigSecretsEnabled)),
-			Cache: SecretsCache{
-				Enabled:      section.GetBool(string(ConfigSecretsCacheEnabled)),
-				MaxSize:      section.GetInt64(string(ConfigSecretsCacheMaxSize)),
-				ItemsToPrune: uint32(section.GetInt(string(ConfigSecretsCacheItemsToPrune))),
-				TTL:          section.GetDuration(string(ConfigSecretsCacheTTL)),
-			},
-		},
-		KMS: KMS{
-			Enabled: section.GetBool(string(ConfigKMSEnabled)),
-			MappingAddressKeyNameRefresh: KMSMappingAddressKeyNameRefresh{
-				Enabled:  section.GetBool(string(ConfigKMSMemoryMappingAddressKeyNameRefreshEnabled)),
-				Interval: section.GetDuration(string(ConfigKMSMemoryMappingAddressKeyNameRefreshInterval)),
-			},
+		UseSecrets:        section.GetBool(string(ConfigSecretAccessKey)),
+		UseKMS:            section.GetBool(string(ConfigSecretAccessKey)),
+		EncryptSecrets:    section.GetBool(string(ConfigSecretAccessKey)),
+		MongoDB: MongoDBConfig{
+			ConnectionString: walletDBSection.GetString(string(ConfigMongoDBConnectionString)),
+			DatabaseName:     walletDBSection.GetString(string(ConfigMongoDBDatabaseName)),
+			CollectionName:   walletDBSection.GetString(string(ConfigMongoDBCollectionName)),
 		},
 	}
-}
-
-// Config holds the complete configuration for AWS KMS.
-type Config struct {
-	Region            string  // AWS region where KMS keys are located
-	AccessKeyID       string  // AWS Access Key ID for authentication
-	SecretAccessKey   string  // AWS Secret Access Key for authentication
-	Secrets           Secrets // Enable or disable AWS Secrets Manager usage
-	KMS               KMS     // Enable or disable AWS KMS usage
-	PrivateAddressKey string  // Global secret key for encryption/decryption
-}
-
-type Secrets struct {
-	Enabled bool
-	Cache   SecretsCache
-}
-
-type KMS struct {
-	Enabled                      bool
-	MappingAddressKeyNameRefresh KMSMappingAddressKeyNameRefresh
-}
-
-// MappingKeyAddressRefresh holds the refresh settings for key-address mapping.
-type KMSMappingAddressKeyNameRefresh struct {
-	Enabled  bool          // Enable automatic refreshing of the mapping
-	Interval time.Duration // Interval duration for refreshing the mapping
-}
-
-// ConfigCache holds the cache configuration settings.
-type SecretsCache struct {
-	Enabled      bool
-	MaxSize      int64
-	ItemsToPrune uint32
-	TTL          time.Duration
 }

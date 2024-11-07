@@ -13,45 +13,20 @@ fileWallet:
   metadata:
     keyFileProperty: '{{ index .signing "key-file" }}'
     passwordFileProperty: '{{ index .signing "password-file" }}'
-
-azureWallet:
-  enabled: false
-  vaultURL: https://YOUR_VAULT_URL.vault.azure.net
-  clientID: YOUR_CLIENT_ID
-  clientSecret: YOUR_CLIENT_SECRET
-  tenantID: YOUR_TENANT_ID
-  secrets: 
-    enabled: true
-    cache:
-      enabled: false
-      maxSize: 1000
-      itemsToPrune: 100
-      ttl: 1h     
-  keyVault: 
-    enabled: true
-    memoryMappingAddressKeyName:  #Only required anable if secrets inactive and keyvault active
-     refresh:
-        enabled: false
-        interval: 5m
         
 awsWallet:
   enabled: false
   region: YOUR_REGION
   accessKeyID: YOUR_ACCESS_KEY       
   secretAccessKey: YOUR_SECRET_ACCESS_KEY
-  secrets: 
-    enabled: true
-    cache:
-      enabled: false
-      maxSize: 1000
-      itemsToPrune: 100
-      ttl: 1h      
-  kms: 
-    enabled: true
-    memoryMappingAddressKeyName: #Automatic enabled if secrets inactived and kms actived
-      refresh:
-        enabled: false
-        interval: 5m   
+  useSecrets: true
+  useKMS: true 
+  encryptSecrets: true
         
+mongodb:
+  connectionString: "mongodb://localhost:27017"
+  databaseName: "WalletDB"
+  collectionName: "Wallets"
+
 log:
   level: debug

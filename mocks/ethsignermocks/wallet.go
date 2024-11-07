@@ -30,11 +30,6 @@ func (_m *Wallet) Close() error {
 	return r0
 }
 
-// AddMappingKeyAddress implements Wallet.
-func (m *Wallet) AddMappingKeyAddress(address string, data []byte) error {
-	return nil
-}
-
 // GetAccounts provides a mock function with given fields: ctx
 func (_m *Wallet) GetAccounts(ctx context.Context) ([]*ethtypes.Address0xHex, error) {
 	ret := _m.Called(ctx)
@@ -108,29 +103,6 @@ func (_m *Wallet) Sign(ctx context.Context, txn *ethsigner.Transaction, chainID 
 
 	if rf, ok := ret.Get(1).(func(context.Context, *ethsigner.Transaction, int64) error); ok {
 		r1 = rf(ctx, txn, chainID)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-func (_m *Wallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
-	ret := _m.Called(ctx, password, privateKeyHex)
-
-	var r0 ethsigner.CreateWalletResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) (ethsigner.CreateWalletResponse, error)); ok {
-		return rf(ctx, password, privateKeyHex)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) ethsigner.CreateWalletResponse); ok {
-		r0 = rf(ctx, password, privateKeyHex)
-	} else {
-		r0 = ret.Get(0).(ethsigner.CreateWalletResponse)
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
-		r1 = rf(ctx, password, privateKeyHex)
 	} else {
 		r1 = ret.Error(1)
 	}

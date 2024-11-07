@@ -31,29 +31,9 @@ type Wallet interface {
 	GetAccounts(ctx context.Context) ([]*ethtypes.Address0xHex /* no checksum on returned values */, error)
 	Refresh(ctx context.Context) error
 	Close() error
-
-	// @willianpatrick - 23/07/2024
-	// CreateWallet optional private key
-	CreateWallet(ctx context.Context, password string, privateKeyHex string) (CreateWalletResponse, error)
-	AddMappingKeyAddress(address string, data []byte) error
 }
 
 type WalletTypedData interface {
 	Wallet
 	SignTypedDataV4(ctx context.Context, from ethtypes.Address0xHex, payload *eip712.TypedData) (*EIP712Result, error)
-}
-
-type CreateWalletRequest struct {
-	Password   string `json:"password,omitempty"`
-	PrivateKey string `json:"privateKey,omitempty"`
-}
-
-type AddKeyAddressMappingRequest struct {
-	KeyName string `json:"keyname,omitempty"`
-	Address string `json:"address,omitempty"`
-}
-
-type CreateWalletResponse struct {
-	KeyName string `json:"keyname,omitempty"`
-	Address string `json:"address"`
 }

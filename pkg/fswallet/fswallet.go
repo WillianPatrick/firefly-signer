@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -51,7 +50,6 @@ type Wallet interface {
 	ethsigner.WalletTypedData
 	GetWalletFile(ctx context.Context, addr ethtypes.Address0xHex) (keystorev3.WalletFile, error)
 	AddListener(listener chan<- ethtypes.Address0xHex)
-	CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error)
 }
 
 func NewFilesystemWallet(ctx context.Context, conf *Config, initialListeners ...chan<- ethtypes.Address0xHex) (ww Wallet, err error) {
@@ -414,91 +412,4 @@ func (w *fsWallet) goTemplateToString(ctx context.Context, filename string, data
 		return "", nil
 	}
 	return val, err
-}
-
-func coalesce(primary, fallback string) string {
-	if primary != "" {
-		return primary
-	}
-	return fallback
-}
-
-func (w *fsWallet) CreateWallet(ctx context.Context, password string, privateKeyHex string) (ethsigner.CreateWalletResponse, error) {
-	var keypair *secp256k1.KeyPair
-	var err error
-
-	if privateKeyHex == "" {
-		keypair, err = secp256k1.GenerateSecp256k1KeyPair()
-		if err != nil {
-			return ethsigner.CreateWalletResponse{}, err
-		}
-	} else {
-		privateKey, err := hex.DecodeString(strings.TrimPrefix(privateKeyHex, "0x"))
-		if err != nil {
-			return ethsigner.CreateWalletResponse{}, err
-		}
-		keypair, err = secp256k1.NewSecp256k1KeyPair(privateKey)
-		if err != nil {
-			return ethsigner.CreateWalletResponse{}, err
-		}
-	}
-
-	var passwordToUse string
-	var passwordFilePath string
-	if password == "" {
-		passwordBytes, err := os.ReadFile(coalesce(w.conf.DefaultPasswordFile, "./data/password"))
-		if err != nil {
-			return ethsigner.CreateWalletResponse{}, fmt.Errorf("failed to read password file: %w", err)
-		}
-		passwordToUse = strings.TrimSpace(string(passwordBytes))
-		passwordFilePath = coalesce(w.conf.DefaultPasswordFile, "./data/password")
-	} else {
-		passwordToUse = password
-		passwordFilePath = path.Join(w.conf.Filenames.PasswordPath, fmt.Sprintf("%s.pwd", strings.TrimPrefix(keypair.Address.String(), "0x")))
-		err = os.WriteFile(passwordFilePath, []byte(passwordToUse), 0600)
-		if err != nil {
-			return ethsigner.CreateWalletResponse{}, fmt.Errorf("failed to write password file: %w", err)
-		}
-	}
-
-	walletFile := keystorev3.NewWalletFileStandard(passwordToUse, keypair)
-	addr := strings.TrimPrefix(keypair.Address.String(), "0x")
-	walletFilePath := path.Join(w.conf.Path, addr)
-
-	walletFileJSON, err := json.Marshal(walletFile)
-	if err != nil {
-		return ethsigner.CreateWalletResponse{}, err
-	}
-
-	err = os.WriteFile(walletFilePath, walletFileJSON, 0600)
-	if err != nil {
-		return ethsigner.CreateWalletResponse{}, err
-	}
-
-	metadataFilePath := path.Join(w.conf.Path, fmt.Sprintf("%s.toml", addr))
-	metadataContent := fmt.Sprintf(`
-[metadata]
-createdAt = "%s"
-description = "File based configuration"
-
-[signing]
-type = "file-based-signer"
-key-file = "%s"
-password-file = "%s"
-`, time.Now().Format(time.RFC3339), walletFilePath, passwordFilePath)
-
-	err = os.WriteFile(metadataFilePath, []byte(metadataContent), 0600)
-	if err != nil {
-		return ethsigner.CreateWalletResponse{}, err
-	}
-
-	fi, err := os.Stat(walletFilePath)
-	if err != nil {
-		return ethsigner.CreateWalletResponse{}, err
-	}
-
-	w.notifyNewFiles(ctx, fi)
-	return ethsigner.CreateWalletResponse{
-		Address: keypair.Address.String(),
-	}, nil
 }

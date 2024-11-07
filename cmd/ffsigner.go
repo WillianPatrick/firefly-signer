@@ -18,15 +18,11 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/hyperledger/firefly-common/pkg/config"
 	"github.com/hyperledger/firefly-common/pkg/i18n"
 	"github.com/hyperledger/firefly-common/pkg/log"
@@ -34,7 +30,6 @@ import (
 	"github.com/hyperledger/firefly-signer/internal/signerconfig"
 	"github.com/hyperledger/firefly-signer/internal/signermsgs"
 	"github.com/hyperledger/firefly-signer/pkg/awswallet"
-	"github.com/hyperledger/firefly-signer/pkg/azurekeyvault"
 	"github.com/hyperledger/firefly-signer/pkg/ethsigner"
 	"github.com/hyperledger/firefly-signer/pkg/fswallet"
 	"github.com/sirupsen/logrus"
@@ -70,7 +65,6 @@ func initConfig() {
 
 func run() error {
 	initConfig()
-	router := mux.NewRouter()
 	err := config.ReadConfig("ffsigner", cfgFile)
 
 	ctx, cancelCtx := context.WithCancel(context.Background())
@@ -96,22 +90,6 @@ func run() error {
 
 	// Initialize the appropriate wallet based on configuration
 	switch {
-	case config.GetBool(signerconfig.KeyVaultEnabled):
-		// Azure Key Vault is enabled
-		azWallet, err := azurekeyvault.NewAzureKeyVaultWallet(ctx, azurekeyvault.ReadConfig(signerconfig.KeyVaultConfig))
-		if err != nil {
-			return err
-		}
-		wallet = azWallet
-
-		// Handle mapping and refresh endpoints if enabled
-		if config.GetBool(signerconfig.KeyVaultMappingKeysEnabled) {
-			router.HandleFunc("/wallets/mapping", addMappingKeyAddressHandler(wallet)).Methods("POST")
-			if config.GetBool(signerconfig.KeyVaultMappingKeysRefreshEnabled) {
-				router.HandleFunc("/wallets/refresh", refreshWalletHandler(wallet)).Methods("POST")
-			}
-		}
-
 	case config.GetBool(signerconfig.AWSWalletEnabled):
 		// AWS KMS is enabled
 		w, err := awswallet.NewAWSKMSWallet(ctx, awswallet.ReadConfig(signerconfig.AWSWalletConfig))
@@ -119,14 +97,6 @@ func run() error {
 			return err
 		}
 		wallet = w
-
-		// Handle mapping and refresh endpoints if enabled
-		if config.GetBool(signerconfig.AWSWalletKMSEnabled) && !config.GetBool(signerconfig.AWSWalletSecretsEnabled) {
-			router.HandleFunc("/wallets/mapping", addMappingKeyAddressHandler(wallet)).Methods("POST")
-			if config.GetBool(signerconfig.AWSWalletKMSMemoryMappingAddressKeyNameRefreshEnabled) {
-				router.HandleFunc("/wallets/refresh", refreshWalletHandler(wallet)).Methods("POST")
-			}
-		}
 
 	case config.GetBool(signerconfig.FileWalletEnabled):
 		// File wallet is enabled
@@ -145,78 +115,12 @@ func run() error {
 		return err
 	}
 
-	// Set up handlers
-	router.HandleFunc("/wallets/create", createWalletHandler(wallet)).Methods("POST")
-
 	server, err := rpcserver.NewServer(ctx, wallet)
 	if err != nil {
 		return err
 	}
 
-	srv := &http.Server{
-		Addr:         ":8555",
-		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  90 * time.Second,
-	}
-
-	go func() {
-		if err := srv.ListenAndServe(); err != nil {
-			log.L(ctx).Errorf("HTTP server failed: %s", err)
-		}
-	}()
-
 	return runServer(server)
-}
-
-func createWalletHandler(wallet ethsigner.Wallet) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req ethsigner.CreateWalletRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		ctx := context.Background()
-		resp, err := wallet.CreateWallet(ctx, req.Password, req.PrivateKey)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			log.L(ctx).Errorf("Failed to encode response: %s", err)
-		}
-	}
-}
-
-func refreshWalletHandler(wallet ethsigner.Wallet) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		if err := wallet.Refresh(ctx); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to refresh wallet: %v", err), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}
-}
-
-func addMappingKeyAddressHandler(wallet ethsigner.Wallet) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req ethsigner.AddKeyAddressMappingRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if err := wallet.AddMappingKeyAddress(req.Address, []byte(req.KeyName)); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to add key address to mapping: %v", err), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}
 }
 
 func runServer(server rpcserver.Server) error {
