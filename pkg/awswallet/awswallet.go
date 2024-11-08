@@ -192,13 +192,14 @@ func (w *kmsWallet) getLocalPrivateKey(address ethtypes.Address0xHex) ([]byte, e
 	}
 
 	addr := common.Address(address).Hex()
-	addrHash := w.hashAddress(addr)
-
+	if w.conf.EncryptSecrets {
+		addr = w.hashAddress(addr)
+	}
 	getSecretInput := &secretsmanager.GetSecretValueInput{
-		SecretId: aws.String(addrHash),
+		SecretId: aws.String(addr),
 	}
 
-	// Use a separate context with timeout for Secrets Manager operation
+	// Retrieve secret with a timeout.
 	secretsCtx, cancel := context.WithTimeout(context.Background(), AWSKMSTimeout)
 	defer cancel()
 
@@ -207,15 +208,17 @@ func (w *kmsWallet) getLocalPrivateKey(address ethtypes.Address0xHex) ([]byte, e
 		return nil, fmt.Errorf("AWS Secrets: failed to retrieve wallet '%s': %w", addr, err)
 	}
 
-	privateKeyBytes, err := w.decryptData(secretValue.SecretBinary, addr)
-	if err != nil {
-		return nil, fmt.Errorf("AWS Secrets: failed to decode private key hex: %w", err)
+	privateKeyBytes := secretValue.SecretBinary
+	if w.conf.EncryptSecrets {
+		privateKeyBytes, err = w.decryptData(secretValue.SecretBinary, addr)
+		if err != nil {
+			return nil, fmt.Errorf("AWS Secrets: failed to decode private key: %w", err)
+		}
 	}
 
-	// Verify that the private key is valid
 	_, err = crypto.ToECDSA(privateKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("AWS Secrets: failed to parse ECDSA private key: %w", err)
+		return nil, fmt.Errorf("AWS Secrets: invalid ECDSA private key: %w", err)
 	}
 
 	return privateKeyBytes, nil
@@ -324,11 +327,76 @@ func (w *kmsWallet) getKeyIDFromMongoDB(ctx context.Context, address string) (st
 		}
 		return "", fmt.Errorf("MongoDB query failed: %w", err)
 	}
+
 	if w.conf.EncryptSecrets {
-		r, _e := w.decryptData([]byte(walletData.KeyID), address)
-		return string(r), _e
+		decryptedKeyID, errDecrypt := w.decryptData([]byte(walletData.KeyID), address)
+		if errDecrypt != nil {
+			return "", fmt.Errorf("failed to decrypt KeyID for address '%s': %w", address, errDecrypt)
+		}
+		return string(decryptedKeyID), nil
 	}
+
 	return walletData.KeyID, nil
+}
+
+// getKMSKeyIDFromSecrets retrieves the KMS KeyId associated with an Ethereum address from Secrets Manager.
+func (w *kmsWallet) getKMSKeyIDFromSecrets(address ethtypes.Address0xHex) (string, error) {
+	addr := common.Address(address).Hex()
+	if w.conf.EncryptSecrets {
+		addr = w.hashAddress(addr)
+	}
+	getSecretInput := &secretsmanager.GetSecretValueInput{
+		SecretId: aws.String(addr),
+	}
+
+	secretsCtx, cancel := context.WithTimeout(context.Background(), AWSKMSTimeout)
+	defer cancel()
+
+	secretValue, err := w.secretsClient.GetSecretValue(secretsCtx, getSecretInput)
+	if err != nil {
+		return "", fmt.Errorf("AWS KMS: failed to retrieve wallet address '%s': %w", addr, err)
+	}
+
+	keyID := string(secretValue.SecretBinary)
+	if w.conf.EncryptSecrets {
+		decryptedKeyID, errDecrypt := w.decryptData(secretValue.SecretBinary, addr)
+		if errDecrypt != nil {
+			return "", fmt.Errorf("AWS KMS: failed to decrypt KeyID for wallet address '%s': %w", addr, errDecrypt)
+		}
+		keyID = string(decryptedKeyID)
+	}
+
+	return keyID, nil
+}
+
+// decryptData decrypts the input ciphertext using AES-GCM with the given address as key material
+func (w *kmsWallet) decryptData(ciphertext []byte, publicAddress string) ([]byte, error) {
+	keyMaterial := w.hashAddress(publicAddress)
+	hash := sha256.Sum256([]byte(keyMaterial))
+	aesKey := hash[:]
+
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
+	}
+
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES GCM mode: %w", err)
+	}
+
+	nonceSize := aesGCM.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return nil, errors.New("ciphertext too short")
+	}
+
+	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+	data, err := aesGCM.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decryption failed: %w", err)
+	}
+
+	return data, nil
 }
 
 // RemoteSignWithSecrets signs the transaction using AWS KMS and Secrets Manager when both are active or both are inactive.
@@ -424,36 +492,6 @@ func (w *kmsWallet) RemoteSignWithSecrets(ctx context.Context, txn *ethsigner.Tr
 	return signedTxBytes, nil
 }
 
-// getKMSKeyIDFromSecrets retrieves the KMS KeyId associated with an Ethereum address from Secrets Manager.
-func (w *kmsWallet) getKMSKeyIDFromSecrets(address ethtypes.Address0xHex) (string, error) {
-	addr := common.Address(address).Hex()
-
-	addrHash := aws.String(w.hashAddress(addr))
-	getSecretInput := &secretsmanager.GetSecretValueInput{
-		SecretId: addrHash,
-	}
-
-	// Use a separate context with timeout for Secrets Manager operation
-	secretsCtx, cancel := context.WithTimeout(context.Background(), AWSKMSTimeout)
-	defer cancel()
-
-	secretValue, err := w.secretsClient.GetSecretValue(secretsCtx, getSecretInput)
-	if err != nil {
-		return "", fmt.Errorf("AWS KMS: failed to retrieve wallet address '%s': %w", addr, err)
-	}
-
-	var keyID = string(secretValue.SecretBinary)
-	if w.conf.EncryptSecrets {
-		keyBinay, err := w.decryptData(secretValue.SecretBinary, addr)
-		if err != nil {
-			return "", fmt.Errorf("AWS KMS: failed to decrypt data for wallet address '%s': %w", addr, err)
-		}
-		keyID = string(keyBinay)
-	}
-
-	return keyID, nil
-}
-
 func (w *kmsWallet) Close() error {
 	if w.walletsCollection != nil {
 		return w.walletsCollection.Database().Client().Disconnect(context.Background())
@@ -488,44 +526,4 @@ func (w *kmsWallet) hashAddress(address string) string {
 	addressBytes, _ := hex.DecodeString(strings.ToLower(strings.TrimPrefix(address, "0x") + w.conf.PrivateAddressKey))
 	hash := sha256.Sum256(addressBytes)
 	return hex.EncodeToString(hash[:])
-}
-
-// decryptData decrypts the input ciphertext using the public address and a global secret key.
-func (w *kmsWallet) decryptData(ciphertext []byte, publicAddress string) ([]byte, error) {
-	// Normalize the public address (remove '0x' prefix and convert to lowercase)
-	// address := strings.ToLower(strings.TrimPrefix(publicAddress, "0x"))
-
-	// Derive the symmetric key using the same method as in encryption
-	keyMaterial := w.hashAddress(publicAddress)
-	hash := sha256.Sum256([]byte(keyMaterial))
-	aesKey := hash[:]
-
-	// Create a new AES cipher using the derived key
-	block, err := aes.NewCipher(aesKey)
-	if err != nil {
-		return nil, err
-	}
-
-	// Use GCM mode for decryption
-	aesGCM, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check that the ciphertext is at least as long as the nonce
-	nonceSize := aesGCM.NonceSize()
-	if len(ciphertext) < nonceSize {
-		return nil, errors.New("ciphertext too short")
-	}
-
-	// Split the nonce and the actual ciphertext
-	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
-
-	// Decrypt the data
-	data, err := aesGCM.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return data, nil
 }
