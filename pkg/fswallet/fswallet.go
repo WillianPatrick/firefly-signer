@@ -109,10 +109,6 @@ type fsWallet struct {
 	fsListenerDone    chan struct{}
 }
 
-func (w *fsWallet) AddMappingKeyAddress(address string, data []byte) error {
-	return nil
-}
-
 func (w *fsWallet) Sign(ctx context.Context, txn *ethsigner.Transaction, chainID int64) ([]byte, error) {
 	unsignedTxBytes, err := json.Marshal(txn)
 	if err != nil {
@@ -288,6 +284,15 @@ func (w *fsWallet) GetWalletFile(ctx context.Context, addr ethtypes.Address0xHex
 	primaryFilename, ok := w.addressToFileMap[addr]
 	w.mux.Unlock()
 	if !ok {
+		err := w.Refresh(ctx)
+		if err != nil {
+			return nil, err
+		}
+		w.mux.Lock()
+		primaryFilename, ok = w.addressToFileMap[addr]
+		w.mux.Unlock()
+	}
+	if !ok {
 		return nil, i18n.NewError(ctx, signermsgs.MsgWalletNotAvailable, addr)
 	}
 
@@ -308,12 +313,12 @@ func (w *fsWallet) GetWalletFile(ctx context.Context, addr ethtypes.Address0xHex
 func (w *fsWallet) loadWalletFile(ctx context.Context, addr ethtypes.Address0xHex, primaryFilename string) (keystorev3.WalletFile, error) {
 	b, err := os.ReadFile(primaryFilename)
 	if err != nil {
-		log.L(ctx).Errorf("Failed to read '%s': %s", primaryFilename, err)
 		return nil, i18n.NewError(ctx, signermsgs.MsgWalletFailed, addr)
 	}
 
 	keyFilename, passwordFilename, err := w.getKeyAndPasswordFiles(ctx, addr, primaryFilename, b)
 	if err != nil {
+		log.L(ctx).Errorf("Failed to read '%s' (keyfile): %s", keyFilename, err)
 		return nil, err
 	}
 	log.L(ctx).Debugf("Reading keyfile=%s passwordfile=%s", keyFilename, passwordFilename)
@@ -321,7 +326,6 @@ func (w *fsWallet) loadWalletFile(ctx context.Context, addr ethtypes.Address0xHe
 	if keyFilename != primaryFilename {
 		b, err = os.ReadFile(keyFilename)
 		if err != nil {
-			log.L(ctx).Errorf("Failed to read '%s' (keyfile): %s", keyFilename, err)
 			return nil, i18n.NewError(ctx, signermsgs.MsgWalletFailed, addr)
 		}
 	}

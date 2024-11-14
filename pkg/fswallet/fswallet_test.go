@@ -346,7 +346,7 @@ func TestGetAccountBadTOMLRefKey(t *testing.T) {
 	f := ff.(*fsWallet)
 
 	_, err = f.getSignerForJSONAccount(ctx, json.RawMessage(`"0x1f185718734552d08278aa70f804580bab5fd2b4"`))
-	assert.Regexp(t, "FF22014", err)
+	assert.Regexp(t, "FF22015", err)
 }
 
 func TestGetAccountNoTemplates(t *testing.T) {
@@ -363,7 +363,7 @@ func TestGetAccountNoTemplates(t *testing.T) {
 	f := ff.(*fsWallet)
 
 	_, err = f.getSignerForJSONAccount(ctx, json.RawMessage(`"0x1f185718734552d08278aa70f804580bab5fd2b4"`))
-	assert.Regexp(t, "FF22014", err)
+	assert.Regexp(t, "FF22015", err)
 }
 
 func TestGetAccountBadKeyfile(t *testing.T) {

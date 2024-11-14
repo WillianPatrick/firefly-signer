@@ -20,9 +20,6 @@ import (
 	"github.com/hyperledger/firefly-common/pkg/config"
 )
 
-var securitySection config.Section
-var walletDBSection config.Section
-
 // Configuration keys for AWS KMS
 var (
 	ConfigSecurityPrivateAddresKey = config.AddRootKey("anonymizedAddressKey")
@@ -75,15 +72,15 @@ func InitConfig(walletSection config.Section, securitySection config.Section, wa
 }
 
 // ReadConfig reads and parses the AWS KMS configuration from the provided section.
-func ReadConfig(section config.Section) *Config {
+func ReadConfig(walletSection config.Section, securitySection config.Section, walletDBSection config.Section) *Config {
 	return &Config{
-		Region:            section.GetString(string(ConfigRegion)),
+		Region:            walletSection.GetString(string(ConfigRegion)),
 		PrivateAddressKey: securitySection.GetString(string(ConfigSecurityPrivateAddresKey)),
-		AccessKeyID:       section.GetString(string(ConfigAccessKeyID)),
-		SecretAccessKey:   section.GetString(string(ConfigSecretAccessKey)),
-		UseSecrets:        section.GetBool(string(ConfigSecretAccessKey)),
-		UseKMS:            section.GetBool(string(ConfigSecretAccessKey)),
-		EncryptSecrets:    section.GetBool(string(ConfigSecretAccessKey)),
+		AccessKeyID:       walletSection.GetString(string(ConfigAccessKeyID)),
+		SecretAccessKey:   walletSection.GetString(string(ConfigSecretAccessKey)),
+		UseSecrets:        walletSection.GetBool(string(ConfigUseSecrets)),
+		UseKMS:            walletSection.GetBool(string(ConfigUseKMS)),
+		EncryptSecrets:    walletSection.GetBool(string(ConfigEncryptSecrets)),
 		MongoDB: MongoDBConfig{
 			ConnectionString: walletDBSection.GetString(string(ConfigMongoDBConnectionString)),
 			DatabaseName:     walletDBSection.GetString(string(ConfigMongoDBDatabaseName)),

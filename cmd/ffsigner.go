@@ -92,7 +92,7 @@ func run() error {
 	switch {
 	case config.GetBool(signerconfig.AWSWalletEnabled):
 		// AWS KMS is enabled
-		w, err := awswallet.NewAWSKMSWallet(ctx, awswallet.ReadConfig(signerconfig.AWSWalletConfig))
+		w, err := awswallet.NewAWSKMSWallet(ctx, awswallet.ReadConfig(signerconfig.AWSWalletConfig, signerconfig.SecurityConfig, signerconfig.MongoDBConfig))
 		if err != nil {
 			return err
 		}
